@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Transit Simulator – Tutorial City</title>
+  <!-- Tailwind (CDN) -->
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     html, body { height: 100%; background: #f8fafc; }
@@ -15,19 +16,25 @@
   <!-- React 18 UMD -->
   <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-  <!-- Babel Standalone for JSX (for quick prototyping) -->
+  <!-- Babel Standalone for JSX (prototype-friendly) -->
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-  <script>window.addEventListener('error', e => { const el=document.getElementById('root'); if(el){ el.innerHTML = '<div style="padding:16px;background:#fef2f2;color:#7f1d1d;border:1px solid #fecaca;border-radius:12px;font-family:ui-sans-serif">\n<strong>Something went wrong loading the app.</strong><br/>Open your browser console (F12 → Console) and share the red error with me.\n</div>'; }});</script>
+  <!-- In-page error notice so a failure isn't a blank screen -->
+  <script>
+    window.addEventListener('error', () => {
+      const el = document.getElementById('root');
+      if (el) el.innerHTML = '<div style="padding:16px;background:#fef2f2;color:#7f1d1d;border:1px solid #fecaca;border-radius:12px;font-family:ui-sans-serif">\n<strong>Something went wrong loading the app.</strong><br/>Open your browser console (F12 → Console) and share the red error with me.\n</div>';
+    });
+  </script>
 
   <script type="text/babel" data-presets="env,react">
     const { useEffect, useMemo, useState } = React;
 
-    /**
-     * Transit Simulator – Tutorial City (single-file, light theme)
-     * Version v0.4 (bulk buys, fuel types, aging, drivers & OT, subsidy, crowding, land use demand)
+    /** Transit Simulator – Tutorial City v0.4 (Fixed Full Build, light theme)
+     *  Features: Fleet & depot, bulk bus buys, fuel types, aging, drivers/OT,
+     *  subsidy, crowding (seated/standing/crush), land-use demand, stop spacing.
      */
 
-    // --- Config & Parameters ---
+    // ======= Parameters =======
     const GRID = 20;
     const CELL_SIZE = 24;
     const CANVAS_SIZE = GRID * CELL_SIZE;
@@ -36,17 +43,17 @@
     const STARTING_CASH = 20_000_000;
     const STOP_CAPEX = 15_000; // per stop
 
-    // Split vehicle-hour cost into drivers + overhead for realism
-    const DRIVER_WAGE_PER_HOUR = 60; // wage+benefits baseline
-    const OVERHEAD_PER_VEH_HOUR = 90; // dispatch, admin, insurance
+    // Split vehicle-hour into wages + overhead
+    const DRIVER_WAGE_PER_HOUR = 60;  // $/hr incl benefits
+    const OVERHEAD_PER_VEH_HOUR = 90; // $/veh-hr (dispatch, admin, ins.)
 
-    // Per‑km cost from fuel type; speed varies with crowding
-    const VEHICLE_SPEED_BASE = 25; // km/h under light crowding
+    // Speed (adjusted by crowding each tick)
+    const VEHICLE_SPEED_BASE = 25; // km/h light crowding
 
-    // Capacity model per bus
+    // Vehicle capacity model
     const SEATED_CAP = 40;
-    const STANDING_CAP = 25; // comfortable standees
-    const CRUSH_EXTRA = 10;  // crush tolerance
+    const STANDING_CAP = 25;
+    const CRUSH_EXTRA = 10; // beyond comfortable standing
     const VEHICLE_CAPACITY = SEATED_CAP + STANDING_CAP + CRUSH_EXTRA; // 75
 
     // Fleet & depot
@@ -56,14 +63,14 @@
     const DEPOT_EXPANSION_COST = 8_000_000;
     const TURNAROUND_MIN = 6; // layover per cycle
 
-    // Fuel types
+    // Fuels
     const FUELS = {
       Diesel: { busCost: 550_000, costPerKm: 1.10, emissions: 1.0 },
       CNG:    { busCost: 600_000, costPerKm: 0.90, emissions: 0.7 },
       BEV:    { busCost: 900_000, costPerKm: 0.50, emissions: 0.2 },
     };
 
-    // Aging
+    // Aging / maintenance
     const BUS_LIFESPAN_YEARS = 12;
     const BASE_MAINT_PER_BUS_YEAR = 35_000;
     function maintMultiplier(age){ return age <= 5 ? 1 : 1 + 0.05 * (age - 5); }
@@ -83,14 +90,14 @@
     const FARE_ELASTICITY = -0.25;
     const WAIT_TIME_SENSITIVITY = 0.06;
 
-    // Subsidy (share of operating gap covered by grants)
-    const SUBSIDY_SHARE = 0.8; // 80%
+    // Subsidy
+    const SUBSIDY_SHARE = 0.8; // 80% of op gap covered
 
-    // Time scale
+    // Time
     const SIM_MINUTES_PER_TICK = 1;
     const TICK_MS = 600;
 
-    // --- Utils ---
+    // ======= Utils =======
     function distance(a,b){ return Math.hypot(a.x-b.x, a.y-b.y); }
     function manhattan(a,b){ return Math.abs(a.x-b.x) + Math.abs(a.y-b.y); }
     function lerp(a,b,t){ return a + (b-a)*t; }
@@ -105,7 +112,7 @@
       }
     }
 
-    // Two land-use layers: population & jobs (correlated but distinct)
+    // Land use layers (population & jobs)
     function generateLandUse(seed=1){
       const rngPop = mulberry32(seed*101);
       const rngJobs = mulberry32(seed*701);
@@ -121,7 +128,7 @@
 
           const aj = rngJobs(), bj = rngJobs();
           const valJ = (aj*0.5 + bj*0.5);
-          const ringBias = Math.exp(-((cx*cx+cy*cy)-0.25)**2 * 2);
+          const ringBias = Math.exp(-Math.pow(((cx*cx+cy*cy)-0.25), 2) * 2); // (**) fixed with Math.pow
           jobs[y][x] = Math.floor(lerp(0,3.2, Math.min(1, valJ*0.5 + 0.5*ringBias)));
         }
       }
@@ -134,6 +141,7 @@
       return sum * 0.1; // 100m per cell
     }
 
+    // ======= App =======
     function App(){
       const [seed, setSeed] = useState(42);
       const land = useMemo(()=> generateLandUse(seed), [seed]);
@@ -157,12 +165,12 @@
       const [dayMinutes, setDayMinutes] = useState(0); // 0..1439
       const [dayVehHours, setDayVehHours] = useState(0); // veh-hrs today
 
-      // Speed adjusts with crowding
+      // Effective speed (affected by crowding)
       const [effSpeed, setEffSpeed] = useState(VEHICLE_SPEED_BASE);
 
       const lineKm = useMemo(()=> polylineLengthKm(stops), [stops]);
 
-      // Cycle time uses current effective speed
+      // Cycle time (round trip + layover)
       const cycleTimeHours = useMemo(()=>{
         const runTimeH = lineKm / Math.max(5, effSpeed);
         return Math.max(0.05, runTimeH*2 + TURNAROUND_MIN/60);
@@ -183,7 +191,7 @@
         return 0.6 + 0.4 * ratio;
       }, [stops]);
 
-      // Catchment with distance-decay and pop/jobs gravity
+      // Catchment with distance decay + pop/jobs gravity
       const demandPotentialPerHour = useMemo(()=>{
         if(stops.length===0) return 0;
         const distMap = new Map();
@@ -204,7 +212,7 @@
           popSum += land.pop[y][x] * w;
           jobsSum += land.jobs[y][x] * w;
         });
-        return (popSum * BASE_DEMAND_PER_CELL_PER_HOUR) * (jobsSum * JOB_ATTRACTION_PER_CELL) ** 0.5 * spacingEff;
+        return (popSum * BASE_DEMAND_PER_CELL_PER_HOUR) * Math.pow((jobsSum * JOB_ATTRACTION_PER_CELL), 0.5) * spacingEff;
       }, [stops, land, spacingEff]);
 
       // Build/Buy actions
@@ -242,7 +250,7 @@
           // Crowding → dwell & comfort → speed penalty for NEXT tick
           const speedPenalty = 0.25 * Math.max(0, lf - 0.8); // up to 25% hit
           const nextSpeed = VEHICLE_SPEED_BASE * (1 - speedPenalty);
-          
+
           // Finance
           const revenuePerMinute = (servedPerHour * fare) / 60;
           // Driver overtime logic (daily)
@@ -391,7 +399,7 @@
             </div>
           </div>
 
-          <footer className="mt-6 text-xs text-slate-500">Transit Simulator v0.4 • Light theme • Single-file build (GitHub Pages ready)</footer>
+          <footer className="mt-6 text-xs text-slate-500">Transit Simulator v0.4 • Fixed single-file build (GitHub Pages ready)</footer>
         </div>
       );
     }
