@@ -1,0 +1,401 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Transit Simulator – Tutorial City</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    html, body { height: 100%; background: #f8fafc; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <!-- React 18 UMD -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <!-- Babel Standalone for JSX (for quick prototyping) -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <script type="text/babel">
+    const { useEffect, useMemo, useState } = React;
+
+    /**
+     * Transit Simulator – Tutorial City (single-file, light theme)
+     * Version v0.4 (bulk buys, fuel types, aging, drivers & OT, subsidy, crowding, land use demand)
+     */
+
+    // --- Config & Parameters ---
+    const GRID = 20;
+    const CELL_SIZE = 24;
+    const CANVAS_SIZE = GRID * CELL_SIZE;
+
+    // Economics
+    const STARTING_CASH = 20_000_000;
+    const STOP_CAPEX = 15_000; // per stop
+
+    // Split vehicle-hour cost into drivers + overhead for realism
+    const DRIVER_WAGE_PER_HOUR = 60; // wage+benefits baseline
+    const OVERHEAD_PER_VEH_HOUR = 90; // dispatch, admin, insurance
+
+    // Per‑km cost from fuel type; speed varies with crowding
+    const VEHICLE_SPEED_BASE = 25; // km/h under light crowding
+
+    // Capacity model per bus
+    const SEATED_CAP = 40;
+    const STANDING_CAP = 25; // comfortable standees
+    const CRUSH_EXTRA = 10;  // crush tolerance
+    const VEHICLE_CAPACITY = SEATED_CAP + STANDING_CAP + CRUSH_EXTRA; // 75
+
+    // Fleet & depot
+    const INITIAL_FLEET = 30;
+    const DEPOT_BASE_CAPACITY = 60;
+    const DEPOT_EXPANSION_STEP = 50;
+    const DEPOT_EXPANSION_COST = 8_000_000;
+    const TURNAROUND_MIN = 6; // layover per cycle
+
+    // Fuel types
+    const FUELS = {
+      Diesel: { busCost: 550_000, costPerKm: 1.10, emissions: 1.0 },
+      CNG:    { busCost: 600_000, costPerKm: 0.90, emissions: 0.7 },
+      BEV:    { busCost: 900_000, costPerKm: 0.50, emissions: 0.2 },
+    };
+
+    // Aging
+    const BUS_LIFESPAN_YEARS = 12;
+    const BASE_MAINT_PER_BUS_YEAR = 35_000;
+    function maintMultiplier(age){ return age <= 5 ? 1 : 1 + 0.05 * (age - 5); }
+
+    // Drivers & shifts
+    const INITIAL_DRIVERS = 80;
+    const SHIFT_HOURS = 8;
+    const OVERTIME_MULT = 1.5;
+
+    // Demand & behavior
+    const BASE_DEMAND_PER_CELL_PER_HOUR = 10; // pop layer
+    const JOB_ATTRACTION_PER_CELL = 10;       // jobs layer
+    const COVERAGE_RADIUS = 3;                // Manhattan cells
+    const WALK_DECAY = 0.35;                  // exp(-k * distance)
+    const TARGET_STOP_SPACING_CELLS = 3;      // ~300m ideal
+    const FARE_REF = 2.0;
+    const FARE_ELASTICITY = -0.25;
+    const WAIT_TIME_SENSITIVITY = 0.06;
+
+    // Subsidy (share of operating gap covered by grants)
+    const SUBSIDY_SHARE = 0.8; // 80%
+
+    // Time scale
+    const SIM_MINUTES_PER_TICK = 1;
+    const TICK_MS = 600;
+
+    // --- Utils ---
+    function distance(a,b){ return Math.hypot(a.x-b.x, a.y-b.y); }
+    function manhattan(a,b){ return Math.abs(a.x-b.x) + Math.abs(a.y-b.y); }
+    function lerp(a,b,t){ return a + (b-a)*t; }
+    function clamp(v,min,max){ return Math.max(min, Math.min(max, v)); }
+
+    function mulberry32(a){
+      return function(){
+        let t = (a += 0x6D2B79F5);
+        t = Math.imul(t ^ (t >>> 15), t | 1);
+        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      }
+    }
+
+    // Two land-use layers: population & jobs (correlated but distinct)
+    function generateLandUse(seed=1){
+      const rngPop = mulberry32(seed*101);
+      const rngJobs = mulberry32(seed*701);
+      const pop = Array.from({length: GRID}, ()=> Array(GRID).fill(0));
+      const jobs = Array.from({length: GRID}, ()=> Array(GRID).fill(0));
+      for(let y=0;y<GRID;y++){
+        for(let x=0;x<GRID;x++){
+          const a = rngPop(), b = rngPop();
+          const valP = (a*0.6 + b*0.4);
+          const cx=(x-GRID/2)/(GRID/2), cy=(y-GRID/2)/(GRID/2);
+          const centerBias = Math.exp(-(cx*cx+cy*cy) * 1.2);
+          pop[y][x] = Math.floor(lerp(0,3.2, Math.min(1, valP*0.5 + 0.5*centerBias)));
+
+          const aj = rngJobs(), bj = rngJobs();
+          const valJ = (aj*0.5 + bj*0.5);
+          const ringBias = Math.exp(-((cx*cx+cy*cy)-0.25)**2 * 2);
+          jobs[y][x] = Math.floor(lerp(0,3.2, Math.min(1, valJ*0.5 + 0.5*ringBias)));
+        }
+      }
+      return { pop, jobs };
+    }
+
+    function polylineLengthKm(points){
+      if(points.length<2) return 0;
+      let sum=0; for(let i=1;i<points.length;i++) sum += distance(points[i-1], points[i]);
+      return sum * 0.1; // 100m per cell
+    }
+
+    function App(){
+      const [seed, setSeed] = useState(42);
+      const land = useMemo(()=> generateLandUse(seed), [seed]);
+
+      const [stops, setStops] = useState([]);
+      const [fare, setFare] = useState(2.0);
+      const [freq, setFreq] = useState(8); // requested veh/hr
+      const [running, setRunning] = useState(false);
+      const [cash, setCash] = useState(STARTING_CASH);
+      const [ridershipHour, setRidershipHour] = useState(0);
+      const [loadFactor, setLoadFactor] = useState(0);
+
+      // Fleet, depot, fuel, aging
+      const [fleet, setFleet] = useState(INITIAL_FLEET);
+      const [avgBusAge, setAvgBusAge] = useState(3);
+      const [depotCapacity, setDepotCapacity] = useState(DEPOT_BASE_CAPACITY);
+      const [fuel, setFuel] = useState("Diesel");
+
+      // Drivers & daily accounting
+      const [drivers, setDrivers] = useState(INITIAL_DRIVERS);
+      const [dayMinutes, setDayMinutes] = useState(0); // 0..1439
+      const [dayVehHours, setDayVehHours] = useState(0); // veh-hrs today
+
+      // Speed adjusts with crowding
+      const [effSpeed, setEffSpeed] = useState(VEHICLE_SPEED_BASE);
+
+      const lineKm = useMemo(()=> polylineLengthKm(stops), [stops]);
+
+      // Cycle time uses current effective speed
+      const cycleTimeHours = useMemo(()=>{
+        const runTimeH = lineKm / Math.max(5, effSpeed);
+        return Math.max(0.05, runTimeH*2 + TURNAROUND_MIN/60);
+      }, [lineKm, effSpeed]);
+
+      const vehPerHourSetting = Math.max(0, freq);
+      const maxBusesInService = Math.floor(Math.min(fleet, depotCapacity));
+      const maxVehPerHourThroughput = maxBusesInService>0 ? (maxBusesInService / cycleTimeHours) : 0;
+      const actualVehPerHour = Math.min(vehPerHourSetting, Math.floor(maxVehPerHourThroughput));
+      const capacityPerHour = actualVehPerHour * VEHICLE_CAPACITY;
+      const avgWait = actualVehPerHour>0 ? (60/actualVehPerHour)/2 : Infinity;
+
+      // Stop spacing efficiency
+      const spacingEff = useMemo(()=>{
+        if(stops.length<2) return 0.6;
+        let sum=0,n=0; for(let i=1;i<stops.length;i++){ sum += manhattan(stops[i-1], stops[i]); n++; }
+        const avg = sum/n; const ratio = Math.min(avg, TARGET_STOP_SPACING_CELLS) / Math.max(avg, TARGET_STOP_SPACING_CELLS);
+        return 0.6 + 0.4 * ratio;
+      }, [stops]);
+
+      // Catchment with distance-decay and pop/jobs gravity
+      const demandPotentialPerHour = useMemo(()=>{
+        if(stops.length===0) return 0;
+        const distMap = new Map();
+        for(const s of stops){
+          for(let dy=-COVERAGE_RADIUS; dy<=COVERAGE_RADIUS; dy++){
+            for(let dx=-COVERAGE_RADIUS; dx<=COVERAGE_RADIUS; dx++){
+              const nx=s.x+dx, ny=s.y+dy; if(nx<0||ny<0||nx>=GRID||ny>=GRID) continue;
+              const d = Math.abs(dx)+Math.abs(dy); if(d>COVERAGE_RADIUS) continue;
+              const key=`${nx},${ny}`; const prev=distMap.get(key);
+              distMap.set(key, prev==null? d : Math.min(prev,d));
+            }
+          }
+        }
+        let popSum=0, jobsSum=0;
+        distMap.forEach((dist, key)=>{
+          const [x,y]=key.split(',').map(Number);
+          const w = Math.exp(-WALK_DECAY * dist);
+          popSum += land.pop[y][x] * w;
+          jobsSum += land.jobs[y][x] * w;
+        });
+        return (popSum * BASE_DEMAND_PER_CELL_PER_HOUR) * (jobsSum * JOB_ATTRACTION_PER_CELL) ** 0.5 * spacingEff;
+      }, [stops, land, spacingEff]);
+
+      // Build/Buy actions
+      function handleCellClick(x,y){
+        if(running) return;
+        setStops(prev=>{ if(prev.some(p=> p.x===x&&p.y===y)) return prev; const next=[...prev,{x,y}]; setCash(c=> c-STOP_CAPEX); return next; });
+      }
+
+      function buyBuses(n){
+        const unit = FUELS[fuel].busCost;
+        const discount = n>=10 ? 0.10 : n>=5 ? 0.05 : 0.0;
+        const total = Math.round(unit * n * (1 - discount));
+        if(running || cash < total) return;
+        setCash(c=> c - total);
+        setFleet(f=> f + n);
+        setAvgBusAge(a=> (a*fleet + 0*n)/ (fleet+n));
+      }
+
+      function expandDepot(){ if(running || cash < DEPOT_EXPANSION_COST) return; setCash(c=> c - DEPOT_EXPANSION_COST); setDepotCapacity(cap=> cap + DEPOT_EXPANSION_STEP); }
+      function hireDrivers(n){ if(running) return; setDrivers(d=> Math.max(0, d + n)); }
+
+      // Simulation tick
+      useEffect(()=>{
+        if(!running) return;
+        const id = setInterval(()=>{
+          // Demand modifiers
+          const priceFactor = Math.pow(Math.max(0.5, Math.min(5, fare))/FARE_REF, FARE_ELASTICITY);
+          const waitFactor = Math.exp(-WAIT_TIME_SENSITIVITY * (isFinite(avgWait)? avgWait : 60));
+
+          // Demand (capacity-bounded)
+          const demand = demandPotentialPerHour * priceFactor * waitFactor;
+          const servedPerHour = Math.min(demand, capacityPerHour);
+          const lf = capacityPerHour>0 ? servedPerHour / capacityPerHour : 0;
+
+          // Crowding → dwell & comfort → speed penalty for NEXT tick
+          const speedPenalty = 0.25 * Math.max(0, lf - 0.8); // up to 25% hit
+          const nextSpeed = VEHICLE_SPEED_BASE * (1 - speedPenalty);
+          
+          // Finance
+          const revenuePerMinute = (servedPerHour * fare) / 60;
+          // Driver overtime logic (daily)
+          const driversDailyCapacity = drivers * SHIFT_HOURS; // driver-hours/day
+          const addVehHours = (actualVehPerHour / 60) * SIM_MINUTES_PER_TICK; // veh-hrs this tick
+          let newDayVehHours = dayVehHours + addVehHours;
+          let overtime = newDayVehHours > driversDailyCapacity;
+          const wageRate = DRIVER_WAGE_PER_HOUR * (overtime ? OVERTIME_MULT : 1);
+          const costPerKm = FUELS[fuel].costPerKm * maintMultiplier(avgBusAge);
+          const hourlyMaint = (fleet * (BASE_MAINT_PER_BUS_YEAR * maintMultiplier(avgBusAge))) / (365*24);
+          const opCostPerHour = actualVehPerHour * (wageRate + OVERHEAD_PER_VEH_HOUR) + actualVehPerHour * (nextSpeed * costPerKm) + hourlyMaint;
+          const opCostPerMinute = opCostPerHour / 60;
+
+          const gapPerMinute = Math.max(0, opCostPerMinute - revenuePerMinute);
+          const subsidyPerMinute = gapPerMinute * SUBSIDY_SHARE;
+
+          setCash(c=> c + (revenuePerMinute - opCostPerMinute + subsidyPerMinute) * SIM_MINUTES_PER_TICK);
+          setRidershipHour(servedPerHour);
+          setLoadFactor(lf);
+          setEffSpeed(nextSpeed);
+
+          // Advance day clock
+          const nm = dayMinutes + SIM_MINUTES_PER_TICK;
+          setDayMinutes(nm >= 1440 ? 0 : nm);
+          setDayVehHours(nm >= 1440 ? addVehHours : newDayVehHours);
+
+          // Aging drift (+1 year per 365 days)
+          const ageDeltaYears = SIM_MINUTES_PER_TICK / 525600;
+          setAvgBusAge(a=> Math.min(20, a + ageDeltaYears));
+        }, TICK_MS);
+        return ()=> clearInterval(id);
+      }, [running, fare, avgWait, capacityPerHour, demandPotentialPerHour, actualVehPerHour, fuel, avgBusAge, drivers, dayVehHours, dayMinutes]);
+
+      const polyline = useMemo(()=> stops.length<2? "" : stops.map(p=> `${p.x*CELL_SIZE + CELL_SIZE/2},${p.y*CELL_SIZE + CELL_SIZE/2}`).join(" "), [stops]);
+      const fmtMoney = (v)=> v.toLocaleString(undefined,{style:'currency', currency:'USD', maximumFractionDigits:0});
+
+      function comfortLabel(lf){
+        if(lf <= SEATED_CAP/VEHICLE_CAPACITY) return "Seated";
+        if(lf <= (SEATED_CAP+STANDING_CAP)/VEHICLE_CAPACITY) return "Standing";
+        if(lf <= 1.0) return "Crush";
+        return ">Capacity";
+      }
+
+      return (
+        <div className="min-h-screen w-full bg-slate-50 text-slate-900 flex flex-col items-center py-6">
+          <h1 className="text-2xl font-semibold tracking-tight">Transit Simulator – Tutorial City</h1>
+          <p className="text-sm text-slate-600">Fleet • Depot • Fuel • Drivers • Subsidy • Crowding • Land use–driven demand</p>
+
+          <div className="mt-4 grid gap-4 grid-cols-1 lg:grid-cols-[auto_440px]">
+            {/* Map */}
+            <div className="relative rounded-2xl overflow-hidden border border-slate-200 bg-white shadow-sm" style={{ width: CANVAS_SIZE, height: CANVAS_SIZE }}>
+              <div className="absolute inset-0">
+                {land.pop.map((row,y)=>(
+                  <div key={y} className="flex">
+                    {row.map((p,x)=>{
+                      const jb = land.jobs[y][x];
+                      const bg = p===0? '#EFF6FF' : p===1? '#DBEAFE' : p===2? '#BFDBFE' : '#93C5FD';
+                      const outline = jb>0 ? '1px solid rgba(234,179,8,0.25)' : '1px solid rgba(2,6,23,0.06)';
+                      return <div key={`${x}-${y}`} onClick={()=> handleCellClick(x,y)} style={{ width: CELL_SIZE, height: CELL_SIZE, backgroundColor: bg, outline, cursor:'crosshair' }} />
+                    })}
+                  </div>
+                ))}
+              </div>
+              <svg className="absolute inset-0" width={CANVAS_SIZE} height={CANVAS_SIZE}>
+                {stops.length>=2 && <polyline points={polyline} fill="none" stroke="#0ea5e9" strokeWidth={4} strokeLinejoin="round" strokeLinecap="round" />}
+              </svg>
+              {stops.map((p,i)=>(
+                <div key={i} className="absolute -translate-x-1/2 -translate-y-1/2" style={{ left: p.x*CELL_SIZE + CELL_SIZE/2, top: p.y*CELL_SIZE + CELL_SIZE/2 }}>
+                  <div className="w-3.5 h-3.5 rounded-full border border-sky-400 bg-sky-500" />
+                </div>
+              ))}
+            </div>
+
+            {/* Controls */}
+            <div className="flex flex-col gap-4">
+              <div className="rounded-2xl bg-white border border-slate-200 p-4 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-xs uppercase text-slate-500">Cash</div>
+                    <div className={`text-xl font-semibold ${cash<0? 'text-rose-600':'text-emerald-600'}`}>{fmtMoney(cash)}</div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-xs uppercase text-slate-500">Ridership</div>
+                    <div className="text-xl font-semibold">{Math.round(ridershipHour).toLocaleString()} / hr</div>
+                  </div>
+                </div>
+                <div className="mt-2 grid grid-cols-3 gap-2 text-xs text-slate-600">
+                  <div>Req: {vehPerHourSetting} veh/hr</div>
+                  <div>Actual: {actualVehPerHour} veh/hr</div>
+                  <div>Cycle: {(cycleTimeHours*60).toFixed(0)} min</div>
+                </div>
+                <div className="mt-2 grid grid-cols-3 gap-2 text-xs text-slate-600">
+                  <div>Speed: {effSpeed.toFixed(1)} km/h</div>
+                  <div>Load: {(loadFactor*100).toFixed(0)}% ({comfortLabel(loadFactor)})</div>
+                  <div>Depot cap: {depotCapacity}</div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl bg-white border border-slate-200 p-4 shadow-sm flex flex-col gap-4">
+                <label className="text-sm"><span className="block text-slate-700 mb-1">Fare ($1.50–$3.00)</span><input type="range" min={1.5} max={3.0} step={0.05} value={fare} onChange={(e)=> setFare(parseFloat(e.target.value))} className="w-full" /></label>
+                <label className="text-sm"><span className="block text-slate-700 mb-1">Requested Frequency (2–20 veh/hr)</span><input type="range" min={2} max={20} step={1} value={freq} onChange={(e)=> setFreq(parseInt(e.target.value))} className="w-full" /></label>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="rounded-xl bg-slate-50 border border-slate-200 p-3">
+                    <div className="text-sm font-medium text-slate-900">Fleet & Depot</div>
+                    <div className="text-xs text-slate-600 mt-1">Buses: <span className="text-slate-900 font-semibold">{fleet}</span> | Depot cap: <span className="text-slate-900 font-semibold">{depotCapacity}</span></div>
+                    <div className="text-xs text-slate-600">Max throughput: <span className="text-slate-900 font-semibold">{Math.floor(maxVehPerHourThroughput)}</span> veh/hr</div>
+                    <div className="mt-2 flex gap-2 flex-wrap">
+                      <button onClick={()=> buyBuses(1)} className="px-2 py-1 rounded-lg text-xs bg-white border border-slate-300 hover:bg-slate-100">Buy 1 ({FUELS[fuel].busCost.toLocaleString()})</button>
+                      <button onClick={()=> buyBuses(5)} className="px-2 py-1 rounded-lg text-xs bg-white border border-slate-300 hover:bg-slate-100">Buy 5 (−5%)</button>
+                      <button onClick={()=> buyBuses(10)} className="px-2 py-1 rounded-lg text-xs bg-white border border-slate-300 hover:bg-slate-100">Buy 10 (−10%)</button>
+                      <button onClick={expandDepot} className="px-2 py-1 rounded-lg text-xs bg-white border border-slate-300 hover:bg-slate-100">Expand Depot +{DEPOT_EXPANSION_STEP} ({DEPOT_EXPANSION_COST.toLocaleString()})</button>
+                    </div>
+                    <div className="text-xs text-slate-600 mt-2">Avg bus age: <span className="text-slate-900 font-semibold">{avgBusAge.toFixed(1)}</span> yrs</div>
+                  </div>
+
+                  <div className="rounded-xl bg-slate-50 border border-slate-200 p-3">
+                    <div className="text-sm font-medium text-slate-900">Fuel, Drivers & Subsidy</div>
+                    <div className="flex gap-2 mt-2 text-xs">
+                      {Object.keys(FUELS).map(k=> (
+                        <button key={k} onClick={()=> setFuel(k)} className={`px-2 py-1 rounded-lg border ${fuel===k? 'bg-sky-100 border-sky-300' : 'bg-white border-slate-300 hover:bg-slate-100'}`}>{k}</button>
+                      ))}
+                    </div>
+                    <div className="text-xs text-slate-600 mt-2">$ / km: <span className="text-slate-900 font-semibold">{FUELS[fuel].costPerKm.toFixed(2)}</span> • Maint ×{maintMultiplier(avgBusAge).toFixed(2)}</div>
+                    <div className="text-xs text-slate-600">Drivers: <span className="text-slate-900 font-semibold">{drivers}</span> (daily cap {drivers*SHIFT_HOURS} drv-hrs)
+                      <button onClick={()=> hireDrivers(+10)} className="ml-2 px-2 py-0.5 rounded bg-white border border-slate-300 hover:bg-slate-100">+10</button>
+                      <button onClick={()=> hireDrivers(-10)} className="ml-1 px-2 py-0.5 rounded bg-white border border-slate-300 hover:bg-slate-100">−10</button>
+                    </div>
+                    <div className="text-xs text-slate-600">Overtime starts past daily cap: ×{OVERTIME_MULT}</div>
+                    <div className="text-xs text-slate-600">Subsidy covers <span className="text-slate-900 font-semibold">{Math.round(SUBSIDY_SHARE*100)}%</span> of op gap</div>
+                  </div>
+                </div>
+
+                <div className="rounded-xl bg-slate-50 border border-slate-200 p-3 text-xs text-slate-700">
+                  <div className="text-sm font-medium text-slate-900 mb-1">Stop Placement & Demand</div>
+                  <p>Catchment uses distance-decay around stops (closer cells contribute more). Demand ≈ Pop × Jobs^0.5 × spacing efficiency × fare & wait factors.</p>
+                  <p className="mt-1">Comfort: Seated ≤{SEATED_CAP}, Standing ≤{SEATED_CAP+STANDING_CAP}, Crush ≤{VEHICLE_CAPACITY}. Heavy crowding slows buses.</p>
+                </div>
+
+                <div className="flex gap-2 flex-wrap mt-1">
+                  <button onClick={()=> setRunning(r=> !r)} className={`px-3 py-2 rounded-xl text-sm font-medium border ${running? 'bg-sky-100 border-sky-300' : 'bg-sky-500 text-white border-sky-600 hover:bg-sky-600'}`}>{running? 'Pause':'Play'}</button>
+                  <button onClick={()=> { setStops([]); setCash(STARTING_CASH); setFleet(INITIAL_FLEET); setDepotCapacity(DEPOT_BASE_CAPACITY); setAvgBusAge(3); setDrivers(INITIAL_DRIVERS); setDayMinutes(0); setDayVehHours(0); setEffSpeed(VEHICLE_SPEED_BASE); }} className="px-3 py-2 rounded-xl text-sm font-medium border bg-white border-slate-300 hover:bg-slate-100">Reset</button>
+                  <button onClick={()=> setSeed(s=> s+1)} className="px-3 py-2 rounded-xl text-sm font-medium border bg-white border-slate-300 hover:bg-slate-100">New Map</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <footer className="mt-6 text-xs text-slate-500">Transit Simulator v0.4 • Light theme • Single-file build (GitHub Pages ready)</footer>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
