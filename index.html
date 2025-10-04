@@ -17,8 +17,9 @@
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <!-- Babel Standalone for JSX (for quick prototyping) -->
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script>window.addEventListener('error', e => { const el=document.getElementById('root'); if(el){ el.innerHTML = '<div style="padding:16px;background:#fef2f2;color:#7f1d1d;border:1px solid #fecaca;border-radius:12px;font-family:ui-sans-serif">\n<strong>Something went wrong loading the app.</strong><br/>Open your browser console (F12 → Console) and share the red error with me.\n</div>'; }});</script>
 
-  <script type="text/babel">
+  <script type="text/babel" data-presets="env,react">
     const { useEffect, useMemo, useState } = React;
 
     /**
