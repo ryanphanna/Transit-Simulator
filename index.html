@@ -20,9 +20,15 @@
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <!-- In-page error notice so a failure isn't a blank screen -->
   <script>
-    window.addEventListener('error', () => {
+    window.addEventListener('error', (e) => {
+      // Only show inline panel for real JS runtime errors (ignore resource 404s like favicon)
+      if (!e || typeof e.message !== 'string' || e.message === '') return;
       const el = document.getElementById('root');
       if (el) el.innerHTML = '<div style="padding:16px;background:#fef2f2;color:#7f1d1d;border:1px solid #fecaca;border-radius:12px;font-family:ui-sans-serif">\n<strong>Something went wrong loading the app.</strong><br/>Open your browser console (F12 → Console) and share the red error with me.\n</div>';
+    });
+    window.addEventListener('unhandledrejection', (e) => {
+      const el = document.getElementById('root');
+      if (el) el.innerHTML = '<div style="padding:16px;background:#fef2f2;color:#7f1d1d;border:1px solid #fecaca;border-radius:12px;font-family:ui-sans-serif">\n<strong>Promise error while loading the app.</strong><br/>Open Console and share the red error with me.\n</div>';
     });
   </script>
 
