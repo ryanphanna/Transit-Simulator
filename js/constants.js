@@ -3,7 +3,7 @@
   TS.GRID = 20;
   TS.CELL_SIZE = 24;
   TS.CANVAS_SIZE = TS.GRID * TS.CELL_SIZE;
-  TS.ROUTE_COLORS = ['#ef4444','#3b82f6','#10b981','#f97316','#8b5cf6','#06b6d4','#e11d48','#0ea5e9','#22c55e','#f59e0b'];
+  TS.ROUTE_COLORS = ['#60d2ba','#7cc4ff','#a3e5a1','#8fb5ff','#f2b5d4','#8be0f1','#f5c06a','#b9a6ff','#68d8bf','#ff9f7c'];
   TS.START_POP = 100000;
   TS.POP_GROWTH_PER_YEAR = 5000;
   TS.MODE_SHARE_TARGET = 5;
