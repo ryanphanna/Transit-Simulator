@@ -43,12 +43,13 @@
 
   TS.catchmentWeights = function ({ stops, land, poiMap, poiJobsBoost }) {
     if (!stops || stops.length === 0) {
-      return { res: 0, dest: 0 };
+      return { res: 0, dest: 0, poiTypes: [] };
     }
 
     const boostFor = poiJobsBoost || (key => TS.POI_TYPES.find(p => p.key === key)?.jobsBoost || 0);
     const poiLookup = poiMap || new Map();
     const weights = new Map();
+    const poiTypes = new Set();
     const R = TS.COVERAGE_RADIUS;
     for (const stop of stops) {
       for (let dy = -R; dy <= R; dy++) {
@@ -74,12 +75,15 @@
       const pop = land.pop[y][x];
       const jobs = land.jobs[y][x];
       const poi = poiLookup.get(key);
+      if (poi) {
+        poiTypes.add(poi);
+      }
       const boost = poi ? boostFor(poi) : 0;
       res += pop * w;
       dest += (jobs * JOB_ATTRACTION_PER_CELL + boost * 5) * w;
     });
 
-    return { res, dest };
+    return { res, dest, poiTypes: Array.from(poiTypes) };
   };
 
   TS.demandPerHour = function ({ stops, land, population, poiMap, poiJobsBoost }) {
@@ -97,9 +101,11 @@
   };
 
   TS.estimateRouteDemand = function ({ stops, land, population, poiMap, fare, targetVPH, serviceHours }) {
-    if (!stops || stops.length < 2) return { perHour: 0, perDay: 0, resWeight: 0, destWeight: 0 };
+    if (!stops || stops.length < 2) {
+      return { perHour: 0, perDay: 0, resWeight: 0, destWeight: 0, grade: null, poiTypesCovered: [] };
+    }
 
-    const { res, dest } = TS.catchmentWeights({ stops, land, poiMap });
+    const { res, dest, poiTypes } = TS.catchmentWeights({ stops, land, poiMap });
     const odPotential = Math.min(res, dest);
     const spacingEff = TS.spacingEfficiency(stops, TS.TARGET_STOP_SPACING_CELLS);
     let perHour = odPotential * TS.BASE_DEMAND_PER_CELL_PER_HOUR * spacingEff;
@@ -114,7 +120,24 @@
     const totalWeight = res + dest;
     const destShare = totalWeight > 0 ? dest / totalWeight : 0;
     const destHeavy = destShare >= 0.75 && dest > 0 && res < dest * 0.33;
-    return { perHour, perDay, resWeight: res, destWeight: dest, destHeavy };
+    const resShare = totalWeight > 0 ? res / totalWeight : 0;
+    let grade = 'C';
+    if (resShare < 0.2) {
+      grade = 'F';
+    } else if (poiTypes.length >= 2) {
+      grade = 'A';
+    } else if (poiTypes.length >= 1 && res > 0 && dest > 0) {
+      grade = 'B';
+    }
+    return {
+      perHour,
+      perDay,
+      resWeight: res,
+      destWeight: dest,
+      destHeavy,
+      grade,
+      poiTypesCovered: poiTypes
+    };
   };
 
   TS.priceFactor = function (fare) { return Math.pow(Math.max(0.5, Math.min(5, fare)) / FARE_REF, FARE_ELASTICITY); };
