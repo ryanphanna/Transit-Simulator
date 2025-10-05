@@ -88,12 +88,12 @@ function App(){
 
   // Auto-start when a route exists (≥3 stops)
   useEffect(()=>{
-    if(!autoStarted && stops.length>=3){
+    if(!autoStarted && !running && stops.length>=3){
       setAutoStarted(true);
       setRunning(true);
       banners.show({ type:'success', text:'🚌 Service started — simulation running.'});
     }
-  }, [stops.length, autoStarted]);
+  }, [stops.length, autoStarted, running]);
 
   // Tick
   useEffect(()=>{
@@ -156,6 +156,39 @@ function App(){
   // UI helpers
   const polyline = useMemo(()=> stops.length<2? "" : stops.map(p=> `${p.x*CELL_SIZE + CELL_SIZE/2},${p.y*CELL_SIZE + CELL_SIZE/2}`).join(" "), [stops]);
   const fmtMoney = v => v.toLocaleString(undefined,{style:'currency',currency:'USD', maximumFractionDigits:0});
+
+  const handleToggleRunning = () => {
+    if(!running){
+      setAutoStarted(true);
+    }
+    setRunning(r=>!r);
+  };
+
+  const resetGame = (nextSeed) => {
+    setRunning(false);
+    setAutoStarted(false);
+    setStops([]);
+    setCash(STARTING_CASH);
+    setFleet(INITIAL_FLEET);
+    setDepotCap(DEPOT_BASE_CAPACITY);
+    setAvgBusAge(3);
+    setDrivers(20);
+    setDayMinutes(0);
+    setTotalMinutes(0);
+    setDayVehHours(0);
+    setEffSpeed(VEHICLE_SPEED_BASE);
+    setPopulation(START_POP);
+    setModeShare(0);
+    setStreakDays(0);
+    setGraduated(false);
+    setServiceStartHour(DEFAULT_SERVICE_START_HOUR);
+    setServiceEndHour(DEFAULT_SERVICE_END_HOUR);
+    const updatedSeed = typeof nextSeed === 'number' ? nextSeed : seed;
+    setPoiMap(generatePOIs(updatedSeed, START_POP));
+    if(typeof nextSeed === 'number'){
+      setSeed(updatedSeed);
+    }
+  };
 
   // Render
   return (
@@ -273,16 +306,9 @@ function App(){
             </div>
 
             <div className="flex gap-2 flex-wrap mt-1">
-              <button onClick={()=>{ if(!running) setAutoStarted(true); setRunning(r=>!r); }} className={`px-3 py-2 rounded-xl text-sm font-medium border ${running? 'bg-sky-100 border-sky-300':'bg-sky-500 text-white border-sky-600 hover:bg-sky-600'}`}>{running? 'Pause':'Play'}</button>
-              <button onClick={()=>{
-                setRunning(false); setAutoStarted(false);
-                setStops([]); setCash(STARTING_CASH); setFleet(INITIAL_FLEET); setDepotCap(DEPOT_BASE_CAPACITY);
-                setAvgBusAge(3); setDrivers(20); setDayMinutes(0); setTotalMinutes(0); setDayVehHours(0); setEffSpeed(VEHICLE_SPEED_BASE);
-                setPopulation(START_POP); setModeShare(0); setStreakDays(0); setGraduated(false);
-                setServiceStartHour(DEFAULT_SERVICE_START_HOUR); setServiceEndHour(DEFAULT_SERVICE_END_HOUR);
-                setPoiMap(generatePOIs(seed, START_POP));
-              }} className="px-3 py-2 rounded-xl text-sm font-medium border bg-white border-slate-300 hover:bg-slate-100">Reset</button>
-              <button onClick={()=>{ setRunning(false); setAutoStarted(false); setSeed(s=> s+1); }} className="px-3 py-2 rounded-xl text-sm font-medium border bg-white border-slate-300 hover:bg-slate-100">New Map</button>
+              <button onClick={handleToggleRunning} className={`px-3 py-2 rounded-xl text-sm font-medium border ${running? 'bg-sky-100 border-sky-300':'bg-sky-500 text-white border-sky-600 hover:bg-sky-600'}`}>{running? 'Pause':'Play'}</button>
+              <button onClick={()=> resetGame()} className="px-3 py-2 rounded-xl text-sm font-medium border bg-white border-slate-300 hover:bg-slate-100">Reset</button>
+              <button onClick={()=> resetGame(seed + 1)} className="px-3 py-2 rounded-xl text-sm font-medium border bg-white border-slate-300 hover:bg-slate-100">New Map</button>
             </div>
           </div>
         </div>
