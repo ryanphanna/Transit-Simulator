@@ -1,4 +1,5 @@
-import {
+const TS = window.TS || (window.TS = {});
+const {
   GRID, CELL_SIZE, CANVAS_SIZE,
   START_POP, POP_GROWTH_PER_YEAR, MODE_SHARE_TARGET, MODE_SHARE_STREAK_DAYS,
   DEFAULT_SERVICE_START_HOUR, DEFAULT_SERVICE_END_HOUR,
@@ -7,16 +8,16 @@ import {
   INITIAL_FLEET, DEPOT_BASE_CAPACITY, DEPOT_EXPANSION_STEP, DEPOT_EXPANSION_COST,
   BASE_MAINT_PER_BUS_YEAR, SHIFT_HOURS, OVERTIME_MULT,
   FUELS, SIM_MINUTES_PER_TICK, TICK_MS
-} from './constants.js';
+} = TS;
 
-import { clamp } from './utils.js';
-import { generateLandUse } from './landuse.js';
-import { generatePOIs, poiIcon, poiJobsBoost } from './poi.js';
-import {
+const { clamp, polylineLengthKm } = TS;
+const { generateLandUse } = TS;
+const { generatePOIs, poiIcon, poiJobsBoost } = TS;
+const {
   cycleTimeHours, actualVehPerHour, capacityPerHour, avgWaitMin,
   demandPerHour, priceFactor, waitFactor, effSpeedFromLoad, financesMinute
-} from './sim.js';
-import { useBanners } from './ui.jsx';
+} = TS;
+const { useBanners } = TS;
 
 const { useEffect, useMemo, useState, useRef } = React;
 
@@ -31,6 +32,7 @@ function App(){
   // Route & time
   const [stops,setStops]=useState([]);
   const [running,setRunning]=useState(false);
+  const [autoStarted,setAutoStarted]=useState(false);
   const [dayMinutes,setDayMinutes]=useState(0);
   const [totalMinutes,setTotalMinutes]=useState(0);
   const [serviceStartHour,setServiceStartHour]=useState(DEFAULT_SERVICE_START_HOUR);
@@ -84,8 +86,49 @@ function App(){
   function expandDepot(){ if(running || cash<DEPOT_EXPANSION_COST) return; setCash(c=>c-DEPOT_EXPANSION_COST); setDepotCap(c=>c+DEPOT_EXPANSION_STEP); }
   function hireDrivers(n){ if(running) return; setDrivers(d=> Math.max(0,d+n)); }
 
+  function resetGame(nextSeed = seed){
+    setStops([]);
+    setRunning(false);
+    setAutoStarted(false);
+    setCash(STARTING_CASH);
+    setFleet(INITIAL_FLEET);
+    setDepotCap(DEPOT_BASE_CAPACITY);
+    setAvgBusAge(3);
+    setDrivers(20);
+    setRidershipHour(0);
+    setLoadFactor(0);
+    setEffSpeed(VEHICLE_SPEED_BASE);
+    setDayMinutes(0);
+    setTotalMinutes(0);
+    setDayVehHours(0);
+    setPopulation(START_POP);
+    setModeShare(0);
+    setStreakDays(0);
+    setGraduated(false);
+    setServiceStartHour(DEFAULT_SERVICE_START_HOUR);
+    setServiceEndHour(DEFAULT_SERVICE_END_HOUR);
+    setPoiMap(generatePOIs(nextSeed, START_POP));
+    setSeed(nextSeed);
+  }
+
+  const handleToggleRunning = () => {
+    setRunning(prev => {
+      const next = !prev;
+      if(!prev && !autoStarted){
+        setAutoStarted(true);
+      }
+      return next;
+    });
+  };
+
   // Auto-start when a route exists (≥3 stops)
-  useEffect(()=>{ if(!running && stops.length>=3){ setRunning(true); banners.show({ type:'success', text:'🚌 Service started — simulation running.'}); } }, [stops.length, running]);
+  useEffect(()=>{
+    if(!autoStarted && !running && stops.length>=3){
+      setRunning(true);
+      setAutoStarted(true);
+      banners.show({ type:'success', text:'🚌 Service started — simulation running.'});
+    }
+  }, [stops.length, running, autoStarted]);
 
   // Tick
   useEffect(()=>{
@@ -151,83 +194,28 @@ function App(){
 
   // Render
   return (
-    <div className="min-h-screen w-full text-slate-900 flex flex-col items-center py-6">
+    <div className="min-h-screen w-full text-slate-900 flex flex-col items-center py-6 px-4 lg:px-8">
       {banners.view}
       <h1 className="text-2xl font-semibold tracking-tight">Transit Simulator – Tutorial City</h1>
       <p className="text-sm text-slate-600">Population {population.toLocaleString()} • Goal: {MODE_SHARE_TARGET}% for {MODE_SHARE_STREAK_DAYS} days</p>
 
-      <div className="mt-4 grid gap-4 grid-cols-1 lg:grid-cols-[auto_520px]">
-        {/* Map */}
-        <div className="relative rounded-2xl overflow-hidden border border-slate-200 bg-white shadow-sm" style={{ width: CANVAS_SIZE, height: CANVAS_SIZE }}>
-          <div className="absolute inset-0">
-            {Array.from({length:GRID}).map((_,y)=>(
-              <div key={y} className="flex">
-                {Array.from({length:GRID}).map((__,x)=>{
-                  const p = land.pop[y][x], jb = land.jobs[y][x], poi = poiMap.get(`${x},${y}`);
-                  const bg = p===0? '#EFF6FF' : p===1? '#DBEAFE' : p===2? '#BFDBFE' : '#93C5FD';
-                  const outline = jb>0 ? '1px solid rgba(234,179,8,0.25)' : '1px solid rgba(2,6,23,0.06)';
-                  return (
-                    <div key={`${x}-${y}`} onClick={()=> handleCellClick(x,y)}
-                         style={{ width: CELL_SIZE, height: CELL_SIZE, backgroundColor:bg, outline, cursor:'crosshair', position:'relative' }}>
-                      {poi && <div style={{position:'absolute', inset:'0', display:'grid', placeItems:'center', fontSize:'12px'}}>{poiIcon(poi)}</div>}
-                    </div>
-                  );
-                })}
-              </div>
-            ))}
-          </div>
-          <svg className="absolute inset-0" width={CANVAS_SIZE} height={CANVAS_SIZE} style={{ pointerEvents:'none' }}>
-            {stops.length>=2 && <polyline points={polyline} fill="none" stroke="#0ea5e9" strokeWidth={4} strokeLinejoin="round" strokeLinecap="round" />}
-          </svg>
-          {stops.map((p,i)=>(
-            <div key={i} className="absolute -translate-x-1/2 -translate-y-1/2" style={{ left:p.x*CELL_SIZE + CELL_SIZE/2, top:p.y*CELL_SIZE + CELL_SIZE/2 }}>
-              <div className="w-3.5 h-3.5 rounded-full border border-sky-400 bg-sky-500" />
-            </div>
-          ))}
-        </div>
-
-        {/* Panels */}
-        <div className="flex flex-col gap-4">
-          {/* HUD */}
-          <div className="rounded-2xl bg-white border border-slate-200 p-4 shadow-sm">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-xs uppercase text-slate-500">Cash</div>
-                <div className={`text-xl font-semibold ${cash<0?'text-rose-600':'text-emerald-600'}`}>{fmtMoney(cash)}</div>
-              </div>
-              <div className="text-right">
-                <div className="text-xs uppercase text-slate-500">Riders</div>
-                <div className="text-xl font-semibold">{Math.round(ridershipHour).toLocaleString()} / hr</div>
-              </div>
-            </div>
-            <div className="mt-2 grid grid-cols-3 gap-2 text-xs text-slate-600">
-              <div>Target: {targetVPH} veh/hr</div>
-              <div>Actual: {Math.floor(actualVPH)} veh/hr</div>
-              <div>Cycle: {(cycH*60).toFixed(0)} min</div>
-            </div>
-            <div className="mt-3">
-              <div className="flex justify-between text-xs text-slate-600">
-                <span>Transit mode share</span>
-                <span>{modeShare.toFixed(2)}% / {MODE_SHARE_TARGET}%</span>
-              </div>
-              <div className="h-2 rounded-full bg-slate-200 overflow-hidden mt-1">
-                <div className="h-full bg-sky-500" style={{ width: `${Math.min(100, (modeShare/MODE_SHARE_TARGET)*100)}%` }} />
-              </div>
-            </div>
-          </div>
-
-          {/* Controls */}
+      <div className="mt-6 w-full max-w-6xl grid gap-6 grid-cols-1 lg:grid-cols-[minmax(0,320px)_minmax(0,1fr)_minmax(0,320px)]">
+        {/* Controls column */}
+        <div className="order-2 lg:order-1 flex flex-col gap-4">
           <div className="rounded-2xl bg-white border border-slate-200 p-4 shadow-sm flex flex-col gap-4">
-            <label className="text-sm">
-              <span className="block text-slate-700 mb-1">{`Fare: $${fare.toFixed(2)} ($1.50–$3.00)`}</span>
-              <input type="range" min={1.5} max={3.0} step={0.05} value={fare} onChange={e=> setFare(parseFloat(e.target.value))} className="w-full" />
-            </label>
-            <label className="text-sm">
-              <span className="block text-slate-700 mb-1">Target Frequency (2–20 veh/hr)</span>
-              <input type="range" min={2} max={20} step={1} value={targetVPH} onChange={e=> setTargetVPH(parseInt(e.target.value))} className="w-full" />
-            </label>
+            <div>
+              <div className="text-sm font-medium text-slate-900">Fares & Frequency</div>
+              <label className="text-sm mt-3 block">
+                <span className="block text-slate-700 mb-1">{`Fare: $${fare.toFixed(2)} ($1.50–$3.00)`}</span>
+                <input type="range" min={1.5} max={3.0} step={0.05} value={fare} onChange={e=> setFare(parseFloat(e.target.value))} className="w-full" />
+              </label>
+              <label className="text-sm mt-4 block">
+                <span className="block text-slate-700 mb-1">Target Frequency (2–20 veh/hr)</span>
+                <input type="range" min={2} max={20} step={1} value={targetVPH} onChange={e=> setTargetVPH(parseInt(e.target.value))} className="w-full" />
+              </label>
+            </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div className="rounded-xl bg-slate-50 border border-slate-200 p-3">
                 <div className="text-sm font-medium text-slate-900">Fleet & Depot</div>
                 <div className="text-xs text-slate-600 mt-1">Buses: <span className="font-semibold">{fleet}</span> | Depot cap: <span className="font-semibold">{depotCap}</span></div>
@@ -254,27 +242,101 @@ function App(){
                 </div>
               </div>
             </div>
+          </div>
 
-            <div className="rounded-2xl bg-slate-50 border border-slate-200 p-3 text-xs text-slate-700">
-              <div className="text-sm font-medium text-slate-900 mb-1">Service Hours</div>
+          <div className="rounded-2xl bg-white border border-slate-200 p-4 shadow-sm flex flex-col gap-3">
+            <div className="text-sm font-medium text-slate-900">Service Management</div>
+            <div className="rounded-xl bg-slate-50 border border-slate-200 p-3 text-xs text-slate-700">
+              <div className="text-sm font-medium text-slate-900 mb-2">Service Hours</div>
               <div className="grid grid-cols-2 gap-3">
                 <label>Start: <input type="number" min="0" max="23" value={serviceStartHour} onChange={e=> setServiceStartHour(clamp(parseInt(e.target.value)||0,0,23))} className="ml-1 w-16 border border-slate-300 rounded px-1" />:00</label>
                 <label>End:   <input type="number" min="1" max="24" value={serviceEndHour}   onChange={e=> setServiceEndHour(clamp(parseInt(e.target.value)||0,1,24))} className="ml-1 w-16 border border-slate-300 rounded px-1" />:00</label>
               </div>
-              <div className="mt-1 text-slate-600">Current span: {Math.max(0, serviceEndHour - serviceStartHour)} hours/day</div>
+              <div className="mt-2 text-slate-600">Span: {Math.max(0, serviceEndHour - serviceStartHour)} hours/day</div>
             </div>
+            <div className="flex gap-2 flex-wrap">
+              <button onClick={handleToggleRunning} className={`px-3 py-2 rounded-xl text-sm font-medium border ${running? 'bg-sky-100 border-sky-300':'bg-sky-500 text-white border-sky-600 hover:bg-sky-600'}`}>{running? 'Pause':'Play'}</button>
+              <button onClick={()=> resetGame()} className="px-3 py-2 rounded-xl text-sm font-medium border bg-white border-slate-300 hover:bg-slate-100">Reset</button>
+              <button onClick={()=> resetGame(seed + 1)} className="px-3 py-2 rounded-xl text-sm font-medium border bg-white border-slate-300 hover:bg-slate-100">New Map</button>
+            </div>
+          </div>
+        </div>
 
-            <div className="flex gap-2 flex-wrap mt-1">
-              <button onClick={()=> setRunning(r=>!r)} className={`px-3 py-2 rounded-xl text-sm font-medium border ${running? 'bg-sky-100 border-sky-300':'bg-sky-500 text-white border-sky-600 hover:bg-sky-600'}`}>{running? 'Pause':'Play'}</button>
-              <button onClick={()=>{
-                setStops([]); setCash(STARTING_CASH); setFleet(INITIAL_FLEET); setDepotCap(DEPOT_BASE_CAPACITY);
-                setAvgBusAge(3); setDrivers(20); setDayMinutes(0); setTotalMinutes(0); setDayVehHours(0); setEffSpeed(VEHICLE_SPEED_BASE);
-                setPopulation(START_POP); setModeShare(0); setStreakDays(0); setGraduated(false);
-                setServiceStartHour(DEFAULT_SERVICE_START_HOUR); setServiceEndHour(DEFAULT_SERVICE_END_HOUR);
-                setPoiMap(generatePOIs(seed, START_POP));
-              }} className="px-3 py-2 rounded-xl text-sm font-medium border bg-white border-slate-300 hover:bg-slate-100">Reset</button>
-              <button onClick={()=> setSeed(s=> s+1)} className="px-3 py-2 rounded-xl text-sm font-medium border bg-white border-slate-300 hover:bg-slate-100">New Map</button>
+        {/* Map column */}
+        <div className="order-1 lg:order-2 flex justify-center">
+          <div className="relative rounded-2xl overflow-hidden border border-slate-200 bg-white shadow-sm" style={{ width: CANVAS_SIZE, height: CANVAS_SIZE }}>
+            <div className="absolute inset-0">
+              {Array.from({length:GRID}).map((_,y)=>(
+                <div key={y} className="flex">
+                  {Array.from({length:GRID}).map((__,x)=>{
+                    const p = land.pop[y][x], jb = land.jobs[y][x], poi = poiMap.get(`${x},${y}`);
+                    const bg = p===0? '#EFF6FF' : p===1? '#DBEAFE' : p===2? '#BFDBFE' : '#93C5FD';
+                    const outline = jb>0 ? '1px solid rgba(234,179,8,0.25)' : '1px solid rgba(2,6,23,0.06)';
+                    return (
+                      <div key={`${x}-${y}`} onClick={()=> handleCellClick(x,y)}
+                           style={{ width: CELL_SIZE, height: CELL_SIZE, backgroundColor:bg, outline, cursor:'crosshair', position:'relative' }}>
+                        {poi && <div style={{position:'absolute', inset:'0', display:'grid', placeItems:'center', fontSize:'12px'}}>{poiIcon(poi)}</div>}
+                      </div>
+                    );
+                  })}
+                </div>
+              ))}
             </div>
+            <svg className="absolute inset-0" width={CANVAS_SIZE} height={CANVAS_SIZE} style={{ pointerEvents:'none' }}>
+              {stops.length>=2 && <polyline points={polyline} fill="none" stroke="#0ea5e9" strokeWidth={4} strokeLinejoin="round" strokeLinecap="round" />}
+            </svg>
+            {stops.map((p,i)=>(
+              <div key={i} className="absolute -translate-x-1/2 -translate-y-1/2" style={{ left:p.x*CELL_SIZE + CELL_SIZE/2, top:p.y*CELL_SIZE + CELL_SIZE/2 }}>
+                <div className="w-3.5 h-3.5 rounded-full border border-sky-400 bg-sky-500" />
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Overview column */}
+        <div className="order-3 lg:order-3 flex flex-col gap-4">
+          <div className="rounded-2xl bg-white border border-slate-200 p-4 shadow-sm">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="text-xs uppercase text-slate-500 tracking-wide">Cash on hand</div>
+                <div className={`text-2xl font-semibold ${cash<0?'text-rose-600':'text-emerald-600'}`}>{fmtMoney(cash)}</div>
+              </div>
+              <div className="text-right">
+                <div className="text-xs uppercase text-slate-500 tracking-wide">Riders served</div>
+                <div className="text-2xl font-semibold">{Math.round(ridershipHour).toLocaleString()} / hr</div>
+              </div>
+            </div>
+            <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-2 text-xs text-slate-600">
+              <div className="flex justify-between"><dt className="font-medium text-slate-700">Target freq.</dt><dd>{targetVPH} veh/hr</dd></div>
+              <div className="flex justify-between"><dt className="font-medium text-slate-700">Actual freq.</dt><dd>{Math.floor(actualVPH)} veh/hr</dd></div>
+              <div className="flex justify-between"><dt className="font-medium text-slate-700">Cycle time</dt><dd>{(cycH*60).toFixed(0)} min</dd></div>
+              <div className="flex justify-between"><dt className="font-medium text-slate-700">Capacity / hr</dt><dd>{Math.floor(capPH).toLocaleString()}</dd></div>
+            </dl>
+            <div className="mt-4">
+              <div className="flex justify-between text-xs text-slate-600">
+                <span>Transit mode share</span>
+                <span>{modeShare.toFixed(2)}% / {MODE_SHARE_TARGET}%</span>
+              </div>
+              <div className="h-2 rounded-full bg-slate-200 overflow-hidden mt-1">
+                <div className="h-full bg-sky-500" style={{ width: `${Math.min(100, (modeShare/MODE_SHARE_TARGET)*100)}%` }} />
+              </div>
+              <div className="mt-2 text-xs text-slate-600 flex justify-between">
+                <span>Streak toward graduation</span>
+                <span>{streakDays} / {MODE_SHARE_STREAK_DAYS} days</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-2xl bg-white border border-slate-200 p-4 shadow-sm">
+            <div className="text-sm font-medium text-slate-900">Operations Snapshot</div>
+            <dl className="mt-3 space-y-2 text-xs text-slate-600">
+              <div className="flex justify-between"><dt className="font-medium text-slate-700">Load factor</dt><dd>{Math.round(loadFactor*100)}%</dd></div>
+              <div className="flex justify-between"><dt className="font-medium text-slate-700">Effective speed</dt><dd>{effSpeed.toFixed(1)} km/h</dd></div>
+              <div className="flex justify-between"><dt className="font-medium text-slate-700">Drivers available</dt><dd>{drivers} ({(drivers*SHIFT_HOURS).toLocaleString()} drv-hrs/day)</dd></div>
+              <div className="flex justify-between"><dt className="font-medium text-slate-700">Fleet ready</dt><dd>{fleet} buses · {fuel}</dd></div>
+              <div className="flex justify-between"><dt className="font-medium text-slate-700">Service window</dt><dd>{serviceStartHour.toString().padStart(2,'0')}:00–{serviceEndHour.toString().padStart(2,'0')}:00</dd></div>
+              <div className="flex justify-between"><dt className="font-medium text-slate-700">Daily veh. hours</dt><dd>{dayVehHours.toFixed(1)}</dd></div>
+            </dl>
           </div>
         </div>
       </div>
