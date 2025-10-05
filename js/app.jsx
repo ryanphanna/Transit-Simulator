@@ -225,9 +225,8 @@
       cycleTimesHrs,
       fleetOwned: fleet,
       driverHoursAvail,
-      depotThroughput,
-      speedKmh: effSpeed
-    }), [routeOperational, cycleTimesHrs, fleet, driverHoursAvail, depotThroughput, effSpeed]);
+      depotThroughput
+    }), [routeOperational, cycleTimesHrs, fleet, driverHoursAvail, depotThroughput]);
 
     const busesAssigned = allocationResult?.busesAssigned || [];
     const allocationDeficit = allocationResult?.deficit || 0;
@@ -762,6 +761,9 @@
       const filled = Math.round(Math.min(total, Math.max(0, ratio * total)));
       return Array.from({ length: total }, (_, idx) => idx < filled);
     }, [vehiclesInUse, fleet]);
+    const fleetUtilPercent = fleet > 0
+      ? Math.round(Math.min(1, Math.max(0, vehiclesInUse / fleet)) * 100)
+      : 0;
 
     const handleToggleRunning = () => {
       if(!running){
@@ -925,19 +927,22 @@
                 <div className="space-y-3 text-xs text-slate-600">
                   <div className="rounded-xl border border-emerald-100/70 bg-emerald-50/60 p-3">
                     <div className="text-sm font-semibold text-slate-900">Operations</div>
-                    <div className="mt-2 space-y-1">
-                      <div className="flex items-center justify-between"><span>Fleet owned</span><span className="font-semibold text-slate-900">{fleet}</span></div>
-                      <div>
-                        <div className="flex items-center justify-between"><span>Fleet in motion</span><span className="font-semibold text-slate-900">{vehiclesInUse}</span></div>
-                        <div className="mt-1 flex items-center gap-0.5" aria-hidden>
-                          {busUsageSlots.map((filled, idx) => (
-                            <span key={idx} className={`text-[13px] leading-none ${filled ? 'text-emerald-600' : 'text-emerald-200/80'}`}>
-                              🚌
-                            </span>
-                          ))}
-                        </div>
+                    <div className="mt-2 space-y-2">
+                      <div className="text-sm font-semibold text-slate-900">
+                        Vehicles in use: {vehiclesInUse} / Fleet: {fleet}
+                        <span className="ml-1 font-normal text-slate-600">(Spare: {spareBuses})</span>
                       </div>
-                      <div className="flex items-center justify-between"><span>Spare buses</span><span className="font-semibold text-slate-900">{spareBuses}</span></div>
+                      <div className="flex items-center justify-between text-sm">
+                        <span>Utilization</span>
+                        <span className="font-semibold text-slate-900">{fleetUtilPercent}%</span>
+                      </div>
+                      <div className="mt-1 flex items-center gap-0.5" aria-hidden>
+                        {busUsageSlots.map((filled, idx) => (
+                          <span key={idx} className={`text-[13px] leading-none ${filled ? 'text-emerald-600' : 'text-emerald-200/80'}`}>
+                            🚌
+                          </span>
+                        ))}
+                      </div>
                       <div className="flex items-center justify-between"><span>Depot capacity</span><span className="font-semibold text-slate-900">{depotCap}</span></div>
                       <div className="flex items-center justify-between"><span>Drivers</span><span className="font-semibold text-slate-900">{drivers} ({driversHours} drv-hrs)</span></div>
                     </div>
@@ -1130,7 +1135,11 @@
                           </div>
                           <div className="mt-1 flex items-center justify-between text-xs text-slate-600">
                             <span>{summary.ridersPerDay !== null ? `${summary.ridersPerDay.toLocaleString()} riders/day` : 'No service yet'}</span>
-                            <span className={`font-semibold ${throttled ? 'text-amber-600' : 'text-slate-700'}`}>
+                            <span
+                              className={`font-semibold ${throttled ? 'text-amber-600' : 'text-slate-700'}`}
+                              title={throttled ? 'Limited by fleet/drivers/depot.' : undefined}
+                              aria-label={throttled ? 'Actual service limited by fleet, drivers, or depot capacity.' : undefined}
+                            >
                               {summary.actualVPH.toFixed(1)} / <span className={throttled ? 'text-slate-400' : 'text-slate-500'}>{summary.targetVPH.toFixed(1)}</span> veh/hr
                             </span>
                           </div>
@@ -1148,7 +1157,11 @@
                   <div className="mt-2 space-y-2">
                     <div className="flex items-center justify-between">
                       <span>Actual / Target</span>
-                      <span className={`font-semibold ${activeThrottled ? 'text-amber-600' : 'text-slate-900'}`}>
+                      <span
+                        className={`font-semibold ${activeThrottled ? 'text-amber-600' : 'text-slate-900'}`}
+                        title={activeThrottled ? 'Limited by fleet/drivers/depot.' : undefined}
+                        aria-label={activeThrottled ? 'Actual service limited by fleet, drivers, or depot capacity.' : undefined}
+                      >
                         {activeActualVPH.toFixed(1)} / <span className={activeThrottled ? 'text-slate-400' : 'text-slate-500'}>{activeTargetVPH.toFixed(1)}</span> veh/hr
                       </span>
                     </div>
@@ -1204,13 +1217,13 @@
                   <div className="mb-2 text-sm font-medium text-slate-900">Fleet & Depot</div>
                   <div className="space-y-1 text-sm text-slate-700">
                     <div>Buses owned: <span className="font-semibold text-slate-900">{fleet}</span></div>
-                    <div>Fleet in motion: <span className="font-semibold text-slate-900">{vehiclesInUse}</span> / {fleet} buses (Spare {spareBuses})</div>
+                    <div>Vehicles in use: <span className="font-semibold text-slate-900">{vehiclesInUse}</span> / {fleet} buses (Spare: {spareBuses})</div>
                     <div>Depot capacity: <span className="font-semibold text-slate-900">{depotCap}</span></div>
                     <div>Max throughput: <span className="font-semibold text-slate-900">{depotThroughputRounded}</span> veh/hr</div>
                   </div>
                   {allocationDeficit > 0 && (
                     <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-700">
-                      Short of {allocationDeficit} buses to hit all target frequencies.
+                      Short by {allocationDeficit} buses to hit targets.
                     </div>
                   )}
                   <div className="mt-3 flex flex-wrap gap-2">
