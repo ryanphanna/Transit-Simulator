@@ -31,7 +31,13 @@
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
-  <!-- Start the app (Babel will transpile ES modules + JSX on the fly) -->
-  <script type="text/babel" data-presets="env,react" data-type="module" src="./js/app.jsx"></script>
+  <!-- Load game files (Babel transpiles each). No import/export in these files. -->
+  <script type="text/babel" data-presets="env"  src="./js/constants.js"></script>
+  <script type="text/babel" data-presets="env"  src="./js/utils.js"></script>
+  <script type="text/babel" data-presets="env"  src="./js/landuse.js"></script>
+  <script type="text/babel" data-presets="env"  src="./js/poi.js"></script>
+  <script type="text/babel" data-presets="env"  src="./js/sim.js"></script>
+  <script type="text/babel" data-presets="env,react" src="./js/ui.jsx"></script>
+  <script type="text/babel" data-presets="env,react" src="./js/app.jsx"></script>
 </body>
 </html>

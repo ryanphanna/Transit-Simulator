@@ -1,4 +1,5 @@
-import {
+const TS = window.TS || (window.TS = {});
+const {
   GRID, CELL_SIZE, CANVAS_SIZE,
   START_POP, POP_GROWTH_PER_YEAR, MODE_SHARE_TARGET, MODE_SHARE_STREAK_DAYS,
   DEFAULT_SERVICE_START_HOUR, DEFAULT_SERVICE_END_HOUR,
@@ -7,16 +8,16 @@ import {
   INITIAL_FLEET, DEPOT_BASE_CAPACITY, DEPOT_EXPANSION_STEP, DEPOT_EXPANSION_COST,
   BASE_MAINT_PER_BUS_YEAR, SHIFT_HOURS, OVERTIME_MULT,
   FUELS, SIM_MINUTES_PER_TICK, TICK_MS
-} from './constants.js';
+} = TS;
 
-import { clamp } from './utils.js';
-import { generateLandUse } from './landuse.js';
-import { generatePOIs, poiIcon, poiJobsBoost } from './poi.js';
-import {
+const { clamp, polylineLengthKm } = TS;
+const { generateLandUse } = TS;
+const { generatePOIs, poiIcon, poiJobsBoost } = TS;
+const {
   cycleTimeHours, actualVehPerHour, capacityPerHour, avgWaitMin,
   demandPerHour, priceFactor, waitFactor, effSpeedFromLoad, financesMinute
-} from './sim.js';
-import { useBanners } from './ui.jsx';
+} = TS;
+const { useBanners } = TS;
 
 const { useEffect, useMemo, useState, useRef } = React;
 
@@ -230,7 +231,7 @@ function App(){
             <div className="grid grid-cols-2 gap-3">
               <div className="rounded-xl bg-slate-50 border border-slate-200 p-3">
                 <div className="text-sm font-medium text-slate-900">Fleet & Depot</div>
-                <div className="text-xs text-slate-600 mt-1">Buses: <span className="font-semibold">{fleet}</span> | Depot cap: <span className="font-semibold">{depotCap}</span></div>
+                <div className="text-xs text-slate-600 mt-1">Buses: <span className="font-semibold">{fleet}</span> | Depot cap:<span className="font-semibold">{depotCap}</span></div>
                 <div className="text-xs text-slate-600">Max throughput: <span className="font-semibold">{Math.floor(maxThrough)}</span> veh/hr</div>
                 <div className="mt-2 flex gap-2 flex-wrap">
                   <button onClick={()=> buyBuses(1)}  className="px-2 py-1 rounded-lg text-xs bg-white border border-slate-300 hover:bg-slate-100">Buy 1 ({FUELS[fuel].busCost.toLocaleString()})</button>
