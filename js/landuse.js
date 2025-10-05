@@ -10,10 +10,15 @@
       const a = rngPop(), b = rngPop();
       const cx = (x - GRID / 2) / (GRID / 2), cy = (y - GRID / 2) / (GRID / 2);
       const centerBias = Math.exp(-(cx * cx + cy * cy) * 1.2);
-      pop[y][x] = Math.floor(Math.min(3.2, (a * 0.6 + b * 0.4) * 0.5 + 0.5 * centerBias) * 3.2);
+      const basePop = (a * 0.6 + b * 0.4) * 0.45 + 0.55 * centerBias;
+      const scaledPop = Math.min(1, basePop * 1.15);
+      pop[y][x] = Math.floor(scaledPop * 3.2);
+
       const aj = rngJobs(), bj = rngJobs();
       const ringBias = Math.exp(-Math.pow(((cx * cx + cy * cy) - 0.25), 2) * 2);
-      jobs[y][x] = Math.floor(Math.min(3.2, (aj * 0.5 + bj * 0.5) * 0.5 + 0.5 * ringBias) * 3.2);
+      const baseJobs = (aj * 0.5 + bj * 0.5) * 0.55 + 0.45 * ringBias;
+      const scaledJobs = Math.min(1, baseJobs * 0.9);
+      jobs[y][x] = Math.floor(scaledJobs * 3.2);
     }
     return { pop, jobs };
   };

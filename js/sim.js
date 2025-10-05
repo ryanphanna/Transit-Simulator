@@ -10,7 +10,7 @@
 
   const LENGTH_FACTOR_THRESHOLD_MIN = 20;
   const LENGTH_FACTOR_DECAY_PER_MIN = 0.02;
-  const LENGTH_FACTOR_MIN = 0.5;
+  const LENGTH_FACTOR_MIN = 0.6;
 
   TS.cycleTimeHours = function (stops, effSpeed) {
     const km = polylineLengthKm(stops);
@@ -102,7 +102,7 @@
 
   TS.estimateRouteDemand = function ({ stops, land, population, poiMap, fare, targetVPH, serviceHours }) {
     if (!stops || stops.length < 2) {
-      return { perHour: 0, perDay: 0, resWeight: 0, destWeight: 0, grade: null, poiTypesCovered: [] };
+      return { perHour: 0, perDay: 0, resWeight: 0, destWeight: 0, destHeavy: false, poiTypesCovered: [], roundTripMinutes: 0 };
     }
 
     const { res, dest, poiTypes } = TS.catchmentWeights({ stops, land, poiMap });
@@ -115,29 +115,41 @@
     perHour = Math.min(perHour, capPH);
     perHour *= (population / TS.START_POP);
     const roundTripMinutes = TS.roundTripMinutes(stops, VEHICLE_SPEED_BASE);
-    perHour *= TS.lengthFactorFromRoundTrip(roundTripMinutes);
+    const lengthFactor = TS.lengthFactorFromRoundTrip(roundTripMinutes);
+    perHour *= lengthFactor;
     const perDay = perHour * Math.max(0, serviceHours);
     const totalWeight = res + dest;
     const destShare = totalWeight > 0 ? dest / totalWeight : 0;
     const destHeavy = destShare >= 0.75 && dest > 0 && res < dest * 0.33;
-    const resShare = totalWeight > 0 ? res / totalWeight : 0;
-    let grade = 'C';
-    if (resShare < 0.2) {
-      grade = 'F';
-    } else if (poiTypes.length >= 2) {
-      grade = 'A';
-    } else if (poiTypes.length >= 1 && res > 0 && dest > 0) {
-      grade = 'B';
-    }
     return {
       perHour,
       perDay,
       resWeight: res,
       destWeight: dest,
       destHeavy,
-      grade,
-      poiTypesCovered: poiTypes
+      poiTypesCovered: poiTypes,
+      roundTripMinutes,
+      lengthFactor
     };
+  };
+
+  TS.routeScoreAndGrade = function ({ resWeight, destWeight, poiTypes = [], connectivity = 0, roundTripMinutes = 0, lengthFactor = 1 }) {
+    const hasStops = resWeight > 0 || destWeight > 0;
+    if (!hasStops) {
+      return { score: 0, grade: 'F', balanceScore: 0, diversity: 0, connectivity: 0, lengthFactor: Math.max(LENGTH_FACTOR_MIN, Math.min(1, lengthFactor)) };
+    }
+    const balance = Math.min(resWeight, destWeight) / (Math.max(resWeight, destWeight) + 1e-6);
+    const balanceScore = Math.min(1, balance / 0.7);
+    const diversity = Math.min(1, poiTypes.length / 3);
+    const connectivityScore = Math.max(0, Math.min(1, connectivity));
+    const length = Math.max(LENGTH_FACTOR_MIN, Math.min(1, lengthFactor || TS.lengthFactorFromRoundTrip(roundTripMinutes)));
+    const score = 0.45 * balanceScore + 0.25 * diversity + 0.20 * connectivityScore + 0.10 * length;
+    let grade = 'F';
+    if (score >= 0.85) grade = 'A';
+    else if (score >= 0.70) grade = 'B';
+    else if (score >= 0.55) grade = 'C';
+    else if (score >= 0.40) grade = 'D';
+    return { score, grade, balanceScore, diversity, connectivity: connectivityScore, lengthFactor: length };
   };
 
   TS.priceFactor = function (fare) { return Math.pow(Math.max(0.5, Math.min(5, fare)) / FARE_REF, FARE_ELASTICITY); };
