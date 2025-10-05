@@ -919,7 +919,10 @@
             </div>
 
             <div className="grid min-h-[calc(100vh-8rem)] grid-cols-1 items-stretch gap-6 pt-6 pb-12 sm:px-2 lg:grid-cols-[320px_minmax(0,1fr)_340px]">
-              <aside className="order-2 flex h-full flex-col gap-4 overflow-y-auto rounded-2xl border border-emerald-100/60 bg-white/85 p-4 shadow-sm lg:order-1">
+              <aside
+                className="order-2 flex h-full flex-col gap-4 overflow-y-auto rounded-2xl border border-emerald-100/60 bg-white/85 p-4 shadow-sm lg:order-1"
+                aria-label="Network overview panel"
+              >
                 <div>
                   <div className="text-xs uppercase text-slate-500">Cash</div>
                   <div className={`text-3xl font-semibold ${cash<0?'text-rose-600':'text-emerald-600'}`}>{fmtMoney(cash)}</div>
@@ -979,7 +982,10 @@
                   </div>
                 </div>
               </aside>
-              <section className="order-1 flex h-full min-h-[420px] min-w-0 flex-col gap-4 rounded-2xl border border-emerald-100/60 bg-white/85 p-4 shadow-sm lg:order-2">
+              <section
+                className="order-1 flex h-full min-h-[420px] min-w-0 flex-col gap-4 rounded-2xl border border-emerald-100/60 bg-white/85 p-4 shadow-sm lg:order-2"
+                aria-label="Active route map and details"
+              >
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
                     <span className="inline-flex h-3 w-3 rounded-full" style={{ backgroundColor: activeRouteSummary?.color || '#0ea5e9' }} />
@@ -1110,7 +1116,10 @@
                   <p className="text-center text-xs text-slate-500">Click to add stops · Shift removes · Pause to tweak at your own pace</p>
                 </div>
               </section>
-              <aside className="order-3 flex h-full flex-col gap-4 overflow-y-auto rounded-2xl border border-emerald-100/60 bg-white/85 p-4 shadow-sm lg:order-3">
+              <aside
+                className="order-3 flex h-full flex-col gap-4 overflow-y-auto rounded-2xl border border-emerald-100/60 bg-white/85 p-4 shadow-sm lg:order-3"
+                aria-label="Route management panel"
+              >
                 <div>
                   <div className="flex items-center justify-between">
                     <div className="text-sm font-medium text-slate-900">Routes</div>
