@@ -32,7 +32,7 @@
     return 0.6 + 0.4 * ratio;
   };
 
-  TS.demandPerHour = function ({ stops, land, population, poiMap }) {
+  TS.demandPerHour = function ({ stops, land, population, poiMap, poiJobsBoost }) {
     if (stops.length === 0) return 0;
     const dist = new Map(); const R = 3;
     for (const s of stops) {
@@ -43,17 +43,18 @@
         const k = `${nx},${ny}`; dist.set(k, Math.min(d, dist.get(k) ?? d));
       }
     }
-    let popSum = 0, jobsSum = 0, poiBoost = 0;
+    const boostFor = poiJobsBoost || (key => TS.POI_TYPES.find(p => p.key === key)?.jobsBoost || 0);
+    let popSum = 0, jobsEff = 0;
     dist.forEach((d, k) => {
       const [x, y] = k.split(',').map(Number);
       const w = Math.exp(-WALK_DECAY * d);
       popSum += land.pop[y][x] * w;
-      jobsSum += land.jobs[y][x] * w;
-      const poi = poiMap.get(k); if (poi) poiBoost += poi === 'airport' ? 2 * w : w;
+      const poi = poiMap.get(k);
+      const boost = poi ? boostFor(poi) : 0;
+      jobsEff += (land.jobs[y][x] * JOB_ATTRACTION_PER_CELL + boost * 5) * w;
     });
 
     const popScale = population / START_POP;
-    const jobsEff = (jobsSum * JOB_ATTRACTION_PER_CELL) + (poiBoost * 5);
     const spacing = TS.spacingEfficiency(stops);
     return (popSum * BASE_DEMAND_PER_CELL_PER_HOUR) * Math.pow(jobsEff, 0.5) * spacing * popScale;
   };
