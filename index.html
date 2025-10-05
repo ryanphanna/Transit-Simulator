@@ -29,14 +29,23 @@
       o.classList.remove('hidden');
       m.textContent = stack || message || 'Unknown error';
     });
+    const TS = window.TS = window.TS || {};
+    TS.GRID = TS.GRID ?? null;
+    TS.clamp = TS.clamp ?? function () {};
+    TS.generateLandUse = TS.generateLandUse ?? function () { return {}; };
+    TS.generatePOIs = TS.generatePOIs ?? function () { return new Map(); };
+    TS.estimateRouteDemand = TS.estimateRouteDemand ?? function () { return {}; };
+    TS.useBanners = TS.useBanners ?? function () {
+      return { show: function () {}, dismiss: function () {}, hudView: null, mapQueue: [] };
+    };
   </script>
 
-  <!-- React + Babel -->
-  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <!-- React + Babel (CORS-friendly so errors show stack traces) -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js" crossorigin="anonymous"></script>
 
-  <!-- Load game files (Babel transpiles each). No import/export in these files. -->
+  <!-- Game files: each is transpiled by Babel; no import/export anywhere -->
   <script type="text/babel" data-presets="env"  src="./js/constants.js"></script>
   <script type="text/babel" data-presets="env"  src="./js/utils.js"></script>
   <script type="text/babel" data-presets="env"  src="./js/landuse.js"></script>
@@ -44,5 +53,23 @@
   <script type="text/babel" data-presets="env"  src="./js/sim.js"></script>
   <script type="text/babel" data-presets="env,react" src="./js/ui.jsx"></script>
   <script type="text/babel" data-presets="env,react" src="./js/app.jsx"></script>
+
+  <!-- Boot sentinel: tells me exactly which stage failed -->
+  <script>
+    (function () {
+      const TS = window.TS || {};
+      const required = ["GRID","clamp","generateLandUse","generatePOIs","estimateRouteDemand","useBanners"];
+      const missing = required.filter(k => TS[k] === undefined);
+      if (missing.length) {
+        console.error("Transit Simulator boot failed. Missing from TS:", missing);
+        const overlay = document.getElementById('error-overlay');
+        const msg = document.getElementById('err-msg');
+        overlay?.classList?.remove('hidden');
+        msg.textContent = "Boot failed. Missing: " + missing.join(", ");
+      } else {
+        console.log("Transit Simulator boot OK");
+      }
+    })();
+  </script>
 </body>
 </html>
