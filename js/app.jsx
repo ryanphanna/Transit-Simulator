@@ -76,8 +76,17 @@ function App(){
 
   // Build actions
   function handleCellClick(x,y){
-    if(running){ banners.show({ type:'info', text:'Pause to edit route — click Pause to add stops.'}); return; }
-    setStops(prev => prev.some(p=>p.x===x&&p.y===y) ? prev : (setCash(c=> c-STOP_CAPEX), [...prev, {x,y}]));
+    if(running){
+      banners.show({ type:'info', text:'Pause to edit route — click Pause to add stops.'});
+      return;
+    }
+    if(stops.some(p=> p.x===x && p.y===y)) return;
+    if(cash < STOP_CAPEX){
+      banners.show({ type:'warn', text:'Not enough cash to build a new stop.'});
+      return;
+    }
+    setCash(c=> c-STOP_CAPEX);
+    setStops(prev => [...prev, {x,y}]);
   }
   function buyBuses(n){
     const unit=FUELS[fuel].busCost; const disc=n>=10?0.10:n>=5?0.05:0; const total=Math.round(unit*n*(1-disc));
@@ -90,6 +99,9 @@ function App(){
     setStops([]);
     setRunning(false);
     setAutoStarted(false);
+    setFare(2.0);
+    setTargetVPH(6);
+    setFuel('Diesel');
     setCash(STARTING_CASH);
     setFleet(INITIAL_FLEET);
     setDepotCap(DEPOT_BASE_CAPACITY);
