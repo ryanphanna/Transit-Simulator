@@ -44,9 +44,11 @@
   TS.TICK_MS = 600;
   TS.AIRPORT_POP_THRESHOLD = 150_000;
   TS.POI_TYPES = [
-    { key:'retail',  label:'Retail',  icon:'🛍️', jobsBoost: 1.0 },
-    { key:'school',  label:'School',  icon:'🏫', jobsBoost: 0.8 },
-    { key:'tourism', label:'Tourism', icon:'🎡', jobsBoost: 1.2 },
-    { key:'airport', label:'Airport', icon:'✈️', jobsBoost: 2.0 },
+    { key:'retail',     label:'Retail',     icon:'🛍️', jobsBoost: 1.0 },
+    { key:'school',     label:'School',     icon:'🏫', jobsBoost: 0.8 },
+    { key:'tourism',    label:'Tourism',    icon:'🎡', jobsBoost: 1.2 },
+    { key:'healthcare', label:'Healthcare', icon:'🏥', jobsBoost: 1.3, minPopulation: 120_000 },
+    { key:'zoo',        label:'Zoo',        icon:'🦒', jobsBoost: 1.1, minPopulation: 140_000 },
+    { key:'airport',    label:'Airport',    icon:'✈️', jobsBoost: 2.0 },
   ];
 })(window);
