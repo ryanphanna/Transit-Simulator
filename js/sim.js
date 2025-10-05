@@ -33,25 +33,43 @@
   TS.avgWaitMin = function (veh) { return veh > 0 ? (60 / veh) / 2 : Infinity; };
 
   TS.busesRequired = function (targetVPH, cycleTimeHours) {
-    return Math.ceil(Math.max(0, targetVPH) * Math.max(0.05, cycleTimeHours));
+    const freq = Math.max(0, Number(targetVPH) || 0);
+    const cycle = Math.max(0, Number(cycleTimeHours) || 0);
+    if (cycle <= 0 || freq <= 0) return 0;
+    return Math.ceil(freq * cycle);
   };
 
   TS.maxDepotThroughput = function (depotCap, rtHoursAvg = 1) {
-    return depotCap * (1 / Math.max(0.1, rtHoursAvg)) * 4;
+    const capacity = Math.max(0, Number(depotCap) || 0);
+    const avg = Math.max(0.25, Number(rtHoursAvg) || 0.25);
+    const turns = Math.max(1, Math.floor(1 / avg));
+    return Math.max(0, Math.floor(capacity * turns));
   };
 
   TS.driverHoursAvailable = function (numDrivers, shiftHours) {
-    return Math.max(0, numDrivers) * Math.max(1, shiftHours);
+    const drivers = Math.max(0, Number(numDrivers) || 0);
+    const shift = Math.max(0, Number(shiftHours) || 0);
+    return drivers * shift;
   };
 
-  TS.allocateFleet = function ({ routes, cycleTimesHrs, fleetOwned, driverHoursAvail, depotThroughput, speedKmh = 25 }) {
-    const req = (routes || []).map((r, i) => TS.busesRequired(r?.targetVPH || 0, cycleTimesHrs?.[i] || 1));
+  TS.allocateFleet = function ({ routes, cycleTimesHrs, fleetOwned, driverHoursAvail, depotThroughput }) {
+    const req = (routes || []).map((r, i) => TS.busesRequired(r?.targetVPH || 0, cycleTimesHrs?.[i] || 0));
     const sumReq = req.reduce((a, b) => a + b, 0);
 
-    let capByFleet = Math.max(0, fleetOwned);
-    const busesByDrivers = Math.floor(Math.max(0, driverHoursAvail) / Math.max(1, TS.SHIFT_HOURS));
-    capByFleet = Math.min(capByFleet, busesByDrivers);
-    capByFleet = Math.max(0, Math.min(capByFleet, Math.floor(Math.max(0, depotThroughput))));
+    const fleetCap = Math.max(0, Math.floor(Number(fleetOwned) || 0));
+    const driverCapRaw = Number(driverHoursAvail);
+    const driverCap = Number.isFinite(driverCapRaw)
+      ? Math.floor(Math.max(0, driverCapRaw) / Math.max(1, TS.SHIFT_HOURS || 1))
+      : Infinity;
+    const depotCapRaw = Number(depotThroughput);
+    const depotCap = Number.isFinite(depotCapRaw)
+      ? Math.max(0, Math.floor(depotCapRaw))
+      : Infinity;
+
+    let capByFleet = fleetCap;
+    capByFleet = Math.min(capByFleet, driverCap);
+    capByFleet = Math.min(capByFleet, depotCap);
+    capByFleet = Math.max(0, capByFleet);
 
     if (sumReq <= capByFleet) {
       return { busesAssigned: req, deficit: 0 };
