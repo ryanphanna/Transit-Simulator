@@ -190,6 +190,23 @@ function App(){
     }
   }, [stops.length, autoStarted, running]);
 
+  const handleDayRollover = useCallback((servedPerHourSnapshot, nextTotalMinutes) => {
+    const dailyRiders = servedPerHourSnapshot * serviceHoursToday;
+    const ms = population>0 ? (dailyRiders/population)*100 : 0;
+    setModeShare(ms);
+    const meets = ms >= MODE_SHARE_TARGET;
+    setStreakDays(prev => {
+      const next = meets ? prev + 1 : 0;
+      if(meets && next >= MODE_SHARE_STREAK_DAYS && !graduated){
+        setGraduated(true);
+        banners.show({ type:'celebrate', text:`🎓 You graduated Tutorial City!`});
+      }
+      return next;
+    });
+    const years = Math.floor(nextTotalMinutes/525_600);
+    setPopulation(START_POP + years*POP_GROWTH_PER_YEAR);
+  }, [serviceHoursToday, population, graduated, banners]);
+
   // Tick
   useEffect(()=>{
     if(!running) return;
@@ -344,23 +361,6 @@ function App(){
       setSeed(updatedSeed);
     }
   };
-
-  const handleDayRollover = useCallback((servedPerHourSnapshot, nextTotalMinutes) => {
-    const dailyRiders = servedPerHourSnapshot * serviceHoursToday;
-    const ms = population>0 ? (dailyRiders/population)*100 : 0;
-    setModeShare(ms);
-    const meets = ms >= MODE_SHARE_TARGET;
-    setStreakDays(prev => {
-      const next = meets ? prev + 1 : 0;
-      if(meets && next >= MODE_SHARE_STREAK_DAYS && !graduated){
-        setGraduated(true);
-        banners.show({ type:'celebrate', text:`🎓 You graduated Tutorial City!`});
-      }
-      return next;
-    });
-    const years = Math.floor(nextTotalMinutes/525_600);
-    setPopulation(START_POP + years*POP_GROWTH_PER_YEAR);
-  }, [serviceHoursToday, population, graduated, banners]);
 
   const handleJumpToService = () => {
     const startMin = serviceStartHour * 60;
