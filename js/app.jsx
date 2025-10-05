@@ -88,12 +88,12 @@ function App(){
 
   // Auto-start when a route exists (≥3 stops)
   useEffect(()=>{
-    if(!autoStarted && stops.length>=3){
+    if(!autoStarted && !running && stops.length>=3){
       setAutoStarted(true);
       setRunning(true);
       banners.show({ type:'success', text:'🚌 Service started — simulation running.'});
     }
-  }, [stops.length, autoStarted]);
+  }, [stops.length, autoStarted, running]);
 
   // Tick
   useEffect(()=>{
@@ -157,6 +157,39 @@ function App(){
   const polyline = useMemo(()=> stops.length<2? "" : stops.map(p=> `${p.x*CELL_SIZE + CELL_SIZE/2},${p.y*CELL_SIZE + CELL_SIZE/2}`).join(" "), [stops]);
   const fmtMoney = v => v.toLocaleString(undefined,{style:'currency',currency:'USD', maximumFractionDigits:0});
 
+  const handleToggleRunning = () => {
+    if(!running){
+      setAutoStarted(true);
+    }
+    setRunning(r=>!r);
+  };
+
+  const resetGame = (nextSeed) => {
+    setRunning(false);
+    setAutoStarted(false);
+    setStops([]);
+    setCash(STARTING_CASH);
+    setFleet(INITIAL_FLEET);
+    setDepotCap(DEPOT_BASE_CAPACITY);
+    setAvgBusAge(3);
+    setDrivers(20);
+    setDayMinutes(0);
+    setTotalMinutes(0);
+    setDayVehHours(0);
+    setEffSpeed(VEHICLE_SPEED_BASE);
+    setPopulation(START_POP);
+    setModeShare(0);
+    setStreakDays(0);
+    setGraduated(false);
+    setServiceStartHour(DEFAULT_SERVICE_START_HOUR);
+    setServiceEndHour(DEFAULT_SERVICE_END_HOUR);
+    const updatedSeed = typeof nextSeed === 'number' ? nextSeed : seed;
+    setPoiMap(generatePOIs(updatedSeed, START_POP));
+    if(typeof nextSeed === 'number'){
+      setSeed(updatedSeed);
+    }
+  };
+
   // Render
   return (
     <div className="min-h-screen w-full text-slate-900 flex flex-col items-center py-6">
@@ -164,39 +197,40 @@ function App(){
       <h1 className="text-2xl font-semibold tracking-tight">Transit Simulator – Tutorial City</h1>
       <p className="text-sm text-slate-600">Population {population.toLocaleString()} • Goal: {MODE_SHARE_TARGET}% for {MODE_SHARE_STREAK_DAYS} days</p>
 
-      <div className="mt-4 grid gap-4 grid-cols-1 lg:grid-cols-[auto_520px]">
+      <div className="mt-4 grid gap-4 grid-cols-1 lg:grid-cols-[auto_520px] xl:grid-cols-[260px_520px_260px] xl:items-stretch">
         {/* Map */}
-        <div className="relative rounded-2xl overflow-hidden border border-slate-200 bg-white shadow-sm" style={{ width: CANVAS_SIZE, height: CANVAS_SIZE }}>
-          <div className="absolute inset-0">
-            {Array.from({length:GRID}).map((_,y)=>(
-              <div key={y} className="flex">
-                {Array.from({length:GRID}).map((__,x)=>{
-                  const p = land.pop[y][x], jb = land.jobs[y][x], poi = poiMap.get(`${x},${y}`);
-                  const bg = p===0? '#EFF6FF' : p===1? '#DBEAFE' : p===2? '#BFDBFE' : '#93C5FD';
-                  const outline = jb>0 ? '1px solid rgba(234,179,8,0.25)' : '1px solid rgba(2,6,23,0.06)';
-                  return (
-                    <div key={`${x}-${y}`} onClick={()=> handleCellClick(x,y)}
-                         style={{ width: CELL_SIZE, height: CELL_SIZE, backgroundColor:bg, outline, cursor:'crosshair', position:'relative' }}>
-                      {poi && <div style={{position:'absolute', inset:'0', display:'grid', placeItems:'center', fontSize:'12px'}}>{poiIcon(poi)}</div>}
-                    </div>
-                  );
-                })}
+        <div className="order-1 xl:order-2 flex justify-center xl:h-full">
+          <div className="relative rounded-2xl overflow-hidden border border-slate-200 bg-white shadow-sm" style={{ width: CANVAS_SIZE, height: CANVAS_SIZE }}>
+            <div className="absolute inset-0">
+              {Array.from({length:GRID}).map((_,y)=>(
+                <div key={y} className="flex">
+                  {Array.from({length:GRID}).map((__,x)=>{
+                    const p = land.pop[y][x], jb = land.jobs[y][x], poi = poiMap.get(`${x},${y}`);
+                    const bg = p===0? '#EFF6FF' : p===1? '#DBEAFE' : p===2? '#BFDBFE' : '#93C5FD';
+                    const outline = jb>0 ? '1px solid rgba(234,179,8,0.25)' : '1px solid rgba(2,6,23,0.06)';
+                    return (
+                      <div key={`${x}-${y}`} onClick={()=> handleCellClick(x,y)}
+                           style={{ width: CELL_SIZE, height: CELL_SIZE, backgroundColor:bg, outline, cursor:'crosshair', position:'relative' }}>
+                        {poi && <div style={{position:'absolute', inset:'0', display:'grid', placeItems:'center', fontSize:'12px'}}>{poiIcon(poi)}</div>}
+                      </div>
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
+            <svg className="absolute inset-0" width={CANVAS_SIZE} height={CANVAS_SIZE} style={{ pointerEvents:'none' }}>
+              {stops.length>=2 && <polyline points={polyline} fill="none" stroke="#0ea5e9" strokeWidth={4} strokeLinejoin="round" strokeLinecap="round" />}
+            </svg>
+            {stops.map((p,i)=>(
+              <div key={i} className="absolute -translate-x-1/2 -translate-y-1/2" style={{ left:p.x*CELL_SIZE + CELL_SIZE/2, top:p.y*CELL_SIZE + CELL_SIZE/2 }}>
+                <div className="w-3.5 h-3.5 rounded-full border border-sky-400 bg-sky-500" />
               </div>
             ))}
           </div>
-          <svg className="absolute inset-0" width={CANVAS_SIZE} height={CANVAS_SIZE} style={{ pointerEvents:'none' }}>
-            {stops.length>=2 && <polyline points={polyline} fill="none" stroke="#0ea5e9" strokeWidth={4} strokeLinejoin="round" strokeLinecap="round" />}
-          </svg>
-          {stops.map((p,i)=>(
-            <div key={i} className="absolute -translate-x-1/2 -translate-y-1/2" style={{ left:p.x*CELL_SIZE + CELL_SIZE/2, top:p.y*CELL_SIZE + CELL_SIZE/2 }}>
-              <div className="w-3.5 h-3.5 rounded-full border border-sky-400 bg-sky-500" />
-            </div>
-          ))}
         </div>
 
-        {/* Panels */}
-        <div className="flex flex-col gap-4">
-          {/* HUD */}
+        {/* HUD */}
+        <div className="order-2 xl:order-1 flex flex-col gap-4 xl:h-full">
           <div className="rounded-2xl bg-white border border-slate-200 p-4 shadow-sm">
             <div className="flex items-center justify-between">
               <div>
@@ -223,8 +257,10 @@ function App(){
               </div>
             </div>
           </div>
+        </div>
 
-          {/* Controls */}
+        {/* Controls */}
+        <div className="order-3 flex flex-col gap-4 xl:h-full">
           <div className="rounded-2xl bg-white border border-slate-200 p-4 shadow-sm flex flex-col gap-4">
             <label className="text-sm">
               <span className="block text-slate-700 mb-1">{`Fare: $${fare.toFixed(2)} ($1.50–$3.00)`}</span>
@@ -273,16 +309,9 @@ function App(){
             </div>
 
             <div className="flex gap-2 flex-wrap mt-1">
-              <button onClick={()=>{ if(!running) setAutoStarted(true); setRunning(r=>!r); }} className={`px-3 py-2 rounded-xl text-sm font-medium border ${running? 'bg-sky-100 border-sky-300':'bg-sky-500 text-white border-sky-600 hover:bg-sky-600'}`}>{running? 'Pause':'Play'}</button>
-              <button onClick={()=>{
-                setRunning(false); setAutoStarted(false);
-                setStops([]); setCash(STARTING_CASH); setFleet(INITIAL_FLEET); setDepotCap(DEPOT_BASE_CAPACITY);
-                setAvgBusAge(3); setDrivers(20); setDayMinutes(0); setTotalMinutes(0); setDayVehHours(0); setEffSpeed(VEHICLE_SPEED_BASE);
-                setPopulation(START_POP); setModeShare(0); setStreakDays(0); setGraduated(false);
-                setServiceStartHour(DEFAULT_SERVICE_START_HOUR); setServiceEndHour(DEFAULT_SERVICE_END_HOUR);
-                setPoiMap(generatePOIs(seed, START_POP));
-              }} className="px-3 py-2 rounded-xl text-sm font-medium border bg-white border-slate-300 hover:bg-slate-100">Reset</button>
-              <button onClick={()=>{ setRunning(false); setAutoStarted(false); setSeed(s=> s+1); }} className="px-3 py-2 rounded-xl text-sm font-medium border bg-white border-slate-300 hover:bg-slate-100">New Map</button>
+              <button onClick={handleToggleRunning} className={`px-3 py-2 rounded-xl text-sm font-medium border ${running? 'bg-sky-100 border-sky-300':'bg-sky-500 text-white border-sky-600 hover:bg-sky-600'}`}>{running? 'Pause':'Play'}</button>
+              <button onClick={()=> resetGame()} className="px-3 py-2 rounded-xl text-sm font-medium border bg-white border-slate-300 hover:bg-slate-100">Reset</button>
+              <button onClick={()=> resetGame(seed + 1)} className="px-3 py-2 rounded-xl text-sm font-medium border bg-white border-slate-300 hover:bg-slate-100">New Map</button>
             </div>
           </div>
         </div>
