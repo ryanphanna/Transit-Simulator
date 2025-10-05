@@ -32,62 +32,62 @@
     return 0.6 + 0.4 * ratio;
   };
 
-  TS.demandPerHour = function ({ stops, land, population, poiMap, poiJobsBoost }) {
-    if (stops.length === 0) return 0;
-    const dist = new Map(); const R = 3;
-    for (const s of stops) {
-      for (let dy = -R; dy <= R; dy++) for (let dx = -R; dx <= R; dx++) {
-        const nx = s.x + dx, ny = s.y + dy;
-        if (nx < 0 || ny < 0 || nx >= land.pop[0].length || ny >= land.pop.length) continue;
-        const d = Math.abs(dx) + Math.abs(dy); if (d > R) continue;
-        const k = `${nx},${ny}`; dist.set(k, Math.min(d, dist.get(k) ?? d));
+  TS.catchmentWeights = function ({ stops, land, poiMap, poiJobsBoost }) {
+    if (!stops || stops.length === 0) {
+      return { res: 0, dest: 0 };
+    }
+
+    const boostFor = poiJobsBoost || (key => TS.POI_TYPES.find(p => p.key === key)?.jobsBoost || 0);
+    const poiLookup = poiMap || new Map();
+    const weights = new Map();
+    const R = TS.COVERAGE_RADIUS;
+    for (const stop of stops) {
+      for (let dy = -R; dy <= R; dy++) {
+        for (let dx = -R; dx <= R; dx++) {
+          const nx = stop.x + dx;
+          const ny = stop.y + dy;
+          if (nx < 0 || ny < 0 || ny >= land.pop.length || nx >= land.pop[0].length) continue;
+          const d = Math.abs(dx) + Math.abs(dy);
+          if (d > R) continue;
+          const w = Math.exp(-WALK_DECAY * d);
+          const key = `${nx},${ny}`;
+          if (w > (weights.get(key) || 0)) {
+            weights.set(key, w);
+          }
+        }
       }
     }
-    const boostFor = poiJobsBoost || (key => TS.POI_TYPES.find(p => p.key === key)?.jobsBoost || 0);
-    let popSum = 0, jobsEff = 0;
-    dist.forEach((d, k) => {
-      const [x, y] = k.split(',').map(Number);
-      const w = Math.exp(-WALK_DECAY * d);
-      popSum += land.pop[y][x] * w;
-      const poi = poiMap.get(k);
+
+    let res = 0;
+    let dest = 0;
+    weights.forEach((w, key) => {
+      const [x, y] = key.split(',').map(Number);
+      const pop = land.pop[y][x];
+      const jobs = land.jobs[y][x];
+      const poi = poiLookup.get(key);
       const boost = poi ? boostFor(poi) : 0;
-      jobsEff += (land.jobs[y][x] * JOB_ATTRACTION_PER_CELL + boost * 5) * w;
+      res += pop * w;
+      dest += (jobs * JOB_ATTRACTION_PER_CELL + boost * 5) * w;
     });
 
+    return { res, dest };
+  };
+
+  TS.demandPerHour = function ({ stops, land, population, poiMap, poiJobsBoost }) {
+    if (stops.length === 0) return 0;
+
+    const { res, dest } = TS.catchmentWeights({ stops, land, poiMap, poiJobsBoost });
+    const odPotential = Math.min(res, dest);
     const popScale = population / START_POP;
     const spacing = TS.spacingEfficiency(stops);
-    return (popSum * BASE_DEMAND_PER_CELL_PER_HOUR) * Math.pow(jobsEff, 0.5) * spacing * popScale;
+
+    return odPotential * BASE_DEMAND_PER_CELL_PER_HOUR * spacing * popScale;
   };
 
   TS.estimateRouteDemand = function ({ stops, land, population, poiMap, fare, targetVPH, serviceHours }) {
     if (!stops || stops.length < 2) return { perHour: 0, perDay: 0, resWeight: 0, destWeight: 0 };
 
-    const R = TS.COVERAGE_RADIUS;
-    const covered = new Map();
-    for (const s of stops) {
-      for (let dy = -R; dy <= R; dy++) {
-        for (let dx = -R; dx <= R; dx++) {
-          const nx = s.x + dx, ny = s.y + dy;
-          if (ny < 0 || nx < 0 || ny >= land.pop.length || nx >= land.pop[0].length) continue;
-          const d = Math.abs(dx) + Math.abs(dy); if (d > R) continue;
-          const w = Math.exp(-TS.WALK_DECAY * d);
-          const key = `${nx},${ny}`;
-          covered.set(key, Math.max(covered.get(key) || 0, w));
-        }
-      }
-    }
-
-    let res = 0, dest = 0;
-    covered.forEach((w, key) => {
-      const [x, y] = key.split(',').map(Number);
-      const pop = land.pop[y][x];
-      const jobs = land.jobs[y][x];
-      const poi = poiMap.get(key);
-      const poiBoost = poi ? (TS.POI_TYPES.find(p => p.key === poi)?.jobsBoost || 0) : 0;
-      res += pop * w;
-      dest += (jobs * TS.JOB_ATTRACTION_PER_CELL + poiBoost * 5) * w;
-    });
-
+    const { res, dest } = TS.catchmentWeights({ stops, land, poiMap });
     const odPotential = Math.min(res, dest);
     const spacingEff = TS.spacingEfficiency(stops, TS.TARGET_STOP_SPACING_CELLS);
     let perHour = odPotential * TS.BASE_DEMAND_PER_CELL_PER_HOUR * spacingEff;
