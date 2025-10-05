@@ -20,11 +20,14 @@
     </div>
   </div>
   <script>
-    window.addEventListener('error', (e)=>{
+    window.addEventListener('error', function (e) {
       const o = document.getElementById('error-overlay');
       const m = document.getElementById('err-msg');
+      const err = e && e.error;
+      const stack = err && err.stack;
+      const message = e && e.message;
       o.classList.remove('hidden');
-      m.textContent = (e?.error?.stack) || e?.message || 'Unknown error';
+      m.textContent = stack || message || 'Unknown error';
     });
   </script>
 
