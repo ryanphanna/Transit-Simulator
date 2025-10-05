@@ -32,6 +32,46 @@
   TS.capacityPerHour = function (veh) { return veh * VEHICLE_CAPACITY; };
   TS.avgWaitMin = function (veh) { return veh > 0 ? (60 / veh) / 2 : Infinity; };
 
+  TS.busesRequired = function (targetVPH, cycleTimeHours) {
+    return Math.ceil(Math.max(0, targetVPH) * Math.max(0.05, cycleTimeHours));
+  };
+
+  TS.maxDepotThroughput = function (depotCap, rtHoursAvg = 1) {
+    return depotCap * (1 / Math.max(0.1, rtHoursAvg)) * 4;
+  };
+
+  TS.driverHoursAvailable = function (numDrivers, shiftHours) {
+    return Math.max(0, numDrivers) * Math.max(1, shiftHours);
+  };
+
+  TS.allocateFleet = function ({ routes, cycleTimesHrs, fleetOwned, driverHoursAvail, depotThroughput, speedKmh = 25 }) {
+    const req = (routes || []).map((r, i) => TS.busesRequired(r?.targetVPH || 0, cycleTimesHrs?.[i] || 1));
+    const sumReq = req.reduce((a, b) => a + b, 0);
+
+    let capByFleet = Math.max(0, fleetOwned);
+    const busesByDrivers = Math.floor(Math.max(0, driverHoursAvail) / Math.max(1, TS.SHIFT_HOURS));
+    capByFleet = Math.min(capByFleet, busesByDrivers);
+    capByFleet = Math.max(0, Math.min(capByFleet, Math.floor(Math.max(0, depotThroughput))));
+
+    if (sumReq <= capByFleet) {
+      return { busesAssigned: req, deficit: 0 };
+    }
+
+    const scale = capByFleet / (sumReq || 1);
+    const assignFloat = req.map(n => n * scale);
+    let busesAssigned = assignFloat.map(n => Math.max(0, Math.floor(n)));
+    let used = busesAssigned.reduce((a, b) => a + b, 0);
+    let remain = capByFleet - used;
+    const frac = assignFloat
+      .map((n, i) => ({ i, f: n - Math.floor(n) }))
+      .sort((a, b) => b.f - a.f);
+    for (let k = 0; k < frac.length && remain > 0; k++, remain--) {
+      busesAssigned[frac[k].i] += 1;
+    }
+    const deficit = Math.max(0, sumReq - capByFleet);
+    return { busesAssigned, deficit };
+  };
+
   TS.spacingEfficiency = function (stops, targetSpacing = 3) {
     if (stops.length < 2) return 0.6;
     let sum = 0, n = 0; for (let i = 1; i < stops.length; i++) {
