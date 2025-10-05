@@ -2,6 +2,13 @@
   const TS = g.TS = g.TS || {};
   const { GRID, AIRPORT_POP_THRESHOLD, POI_TYPES } = TS;
   const { clamp, mulberry32 } = TS;
+  const POI_WEIGHTS = {
+    retail: 55,
+    school: 20,
+    tourism: 25,
+    healthcare: 30,
+    zoo: 15,
+  };
   const iconFor = key => POI_TYPES.find(p => p.key === key)?.icon || '';
   const boostFor = key => POI_TYPES.find(p => p.key === key)?.jobsBoost || 0;
   TS.poiIcon = function (key) { return iconFor(key); };
@@ -14,7 +21,17 @@
     const sat1 = { x: Math.floor(GRID * 0.25), y: Math.floor(GRID * 0.3) };
     const sat2 = { x: Math.floor(GRID * 0.75), y: Math.floor(GRID * 0.7) };
 
-    function pick() { const r = rng(); if (r < 0.45) return 'retail'; if (r < 0.65) return 'school'; if (r < 0.90) return 'tourism'; return 'retail'; }
+    function pick() {
+      const available = POI_TYPES.filter(p => p.key !== 'airport' && (!p.minPopulation || population >= p.minPopulation));
+      if (!available.length) return 'retail';
+      const totalWeight = available.reduce((sum, type) => sum + (POI_WEIGHTS[type.key] || 1), 0);
+      let roll = rng() * totalWeight;
+      for (const type of available) {
+        roll -= (POI_WEIGHTS[type.key] || 1);
+        if (roll <= 0) return type.key;
+      }
+      return available[available.length - 1].key;
+    }
     function placeNear(center, share) {
       const n = Math.round(count * share);
       for (let i = 0; i < n; i++) {
