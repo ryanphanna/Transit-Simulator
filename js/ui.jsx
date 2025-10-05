@@ -59,7 +59,7 @@
     );
   };
 
-  TS.NumberStepper = function NumberStepper({ value, onChange, min, max, step = 1, format = (v) => String(v) }) {
+  TS.NumberStepper = function NumberStepper({ value, onChange, min, max, step = 1, format = (v) => String(v), showValueLabel = true }) {
     const lower = typeof min === 'number' ? min : -Infinity;
     const upper = typeof max === 'number' ? max : Infinity;
     const normalize = (next) => {
@@ -92,8 +92,43 @@
         >
           +
         </button>
-        <span className="ml-2 text-sm text-slate-700">{format(value)}</span>
+        {showValueLabel && (
+          <span className="ml-2 text-sm text-slate-700">{format(value)}</span>
+        )}
       </div>
+    );
+  };
+
+  const BAND_COLORS = {
+    '🟩 Excellent': 'border-emerald-200 bg-emerald-100/80 text-emerald-800',
+    '🟦 Good': 'border-sky-200 bg-sky-100/80 text-sky-800',
+    '🟨 Moderate': 'border-amber-200 bg-amber-100/80 text-amber-800',
+    '🟧 Needs Work': 'border-orange-200 bg-orange-100/80 text-orange-800',
+    '🟥 Poor': 'border-rose-200 bg-rose-100/80 text-rose-800'
+  };
+
+  TS.BandPill = function BandPill({ band, size = 'md', title }) {
+    if (!band) {
+      return <span className="text-xs text-slate-400">—</span>;
+    }
+    const baseTitle = title || 'Balance, connectivity, spacing, and route length.';
+    const [emoji, ...rest] = String(band).split(' ');
+    const label = rest.join(' ').trim() || String(band).trim();
+    const sizeClass = size === 'sm'
+      ? 'px-2 py-0.5 text-[11px]'
+      : size === 'lg'
+        ? 'px-3 py-1 text-sm'
+        : 'px-2.5 py-0.5 text-xs';
+    const colorClass = BAND_COLORS[band] || 'border-slate-200 bg-slate-100 text-slate-700';
+    return (
+      <span
+        className={`inline-flex items-center gap-1 rounded-full border font-semibold ${sizeClass} ${colorClass}`}
+        title={baseTitle}
+        aria-label={`${emoji ? `${emoji} ` : ''}${label || band}. ${baseTitle}`.trim()}
+      >
+        <span aria-hidden="true">{emoji || '⬤'}</span>
+        <span className="capitalize">{label || band}</span>
+      </span>
     );
   };
 

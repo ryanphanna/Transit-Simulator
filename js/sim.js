@@ -33,25 +33,43 @@
   TS.avgWaitMin = function (veh) { return veh > 0 ? (60 / veh) / 2 : Infinity; };
 
   TS.busesRequired = function (targetVPH, cycleTimeHours) {
-    return Math.ceil(Math.max(0, targetVPH) * Math.max(0.05, cycleTimeHours));
+    const freq = Math.max(0, Number(targetVPH) || 0);
+    const cycle = Math.max(0, Number(cycleTimeHours) || 0);
+    if (cycle <= 0 || freq <= 0) return 0;
+    return Math.ceil(freq * cycle);
   };
 
   TS.maxDepotThroughput = function (depotCap, rtHoursAvg = 1) {
-    return depotCap * (1 / Math.max(0.1, rtHoursAvg)) * 4;
+    const capacity = Math.max(0, Number(depotCap) || 0);
+    const avg = Math.max(0.25, Number(rtHoursAvg) || 0.25);
+    const turns = Math.max(1, Math.floor(1 / avg));
+    return Math.max(0, Math.floor(capacity * turns));
   };
 
   TS.driverHoursAvailable = function (numDrivers, shiftHours) {
-    return Math.max(0, numDrivers) * Math.max(1, shiftHours);
+    const drivers = Math.max(0, Number(numDrivers) || 0);
+    const shift = Math.max(0, Number(shiftHours) || 0);
+    return drivers * shift;
   };
 
-  TS.allocateFleet = function ({ routes, cycleTimesHrs, fleetOwned, driverHoursAvail, depotThroughput, speedKmh = 25 }) {
-    const req = (routes || []).map((r, i) => TS.busesRequired(r?.targetVPH || 0, cycleTimesHrs?.[i] || 1));
+  TS.allocateFleet = function ({ routes, cycleTimesHrs, fleetOwned, driverHoursAvail, depotThroughput }) {
+    const req = (routes || []).map((r, i) => TS.busesRequired(r?.targetVPH || 0, cycleTimesHrs?.[i] || 0));
     const sumReq = req.reduce((a, b) => a + b, 0);
 
-    let capByFleet = Math.max(0, fleetOwned);
-    const busesByDrivers = Math.floor(Math.max(0, driverHoursAvail) / Math.max(1, TS.SHIFT_HOURS));
-    capByFleet = Math.min(capByFleet, busesByDrivers);
-    capByFleet = Math.max(0, Math.min(capByFleet, Math.floor(Math.max(0, depotThroughput))));
+    const fleetCap = Math.max(0, Math.floor(Number(fleetOwned) || 0));
+    const driverCapRaw = Number(driverHoursAvail);
+    const driverCap = Number.isFinite(driverCapRaw)
+      ? Math.floor(Math.max(0, driverCapRaw) / Math.max(1, TS.SHIFT_HOURS || 1))
+      : Infinity;
+    const depotCapRaw = Number(depotThroughput);
+    const depotCap = Number.isFinite(depotCapRaw)
+      ? Math.max(0, Math.floor(depotCapRaw))
+      : Infinity;
+
+    let capByFleet = fleetCap;
+    capByFleet = Math.min(capByFleet, driverCap);
+    capByFleet = Math.min(capByFleet, depotCap);
+    capByFleet = Math.max(0, capByFleet);
 
     if (sumReq <= capByFleet) {
       return { busesAssigned: req, deficit: 0 };
@@ -173,23 +191,113 @@
     };
   };
 
-  TS.routeScoreAndGrade = function ({ resWeight, destWeight, poiTypes = [], connectivity = 0, roundTripMinutes = 0, lengthFactor = 1 }) {
+  const BAND_THRESHOLDS = [
+    { min: 0.85, label: '🟩 Excellent' },
+    { min: 0.65, label: '🟦 Good' },
+    { min: 0.45, label: '🟨 Moderate' },
+    { min: 0.25, label: '🟧 Needs Work' },
+    { min: -Infinity, label: '🟥 Poor' }
+  ];
+
+  function bandForScore(score) {
+    const s = Number.isFinite(score) ? Math.max(0, Math.min(1, score)) : 0;
+    for (const tier of BAND_THRESHOLDS) {
+      if (s >= tier.min) return tier.label;
+    }
+    return BAND_THRESHOLDS[BAND_THRESHOLDS.length - 1].label;
+  }
+
+  TS.routePerformanceSummary = function ({ resWeight, destWeight, poiTypes = [], connectivity = 0, roundTripMinutes = 0, lengthFactor = 1 }) {
     const hasStops = resWeight > 0 || destWeight > 0;
     if (!hasStops) {
-      return { score: 0, grade: 'F', balanceScore: 0, diversity: 0, connectivity: 0, lengthFactor: Math.max(LENGTH_FACTOR_MIN, Math.min(1, lengthFactor)) };
+      const baseLength = Math.max(LENGTH_FACTOR_MIN, Math.min(1, lengthFactor));
+      return { score: 0, band: BAND_THRESHOLDS[BAND_THRESHOLDS.length - 1].label, balanceScore: 0, diversity: 0, connectivity: 0, lengthFactor: baseLength };
     }
     const balance = Math.min(resWeight, destWeight) / (Math.max(resWeight, destWeight) + 1e-6);
     const balanceScore = Math.min(1, balance / 0.7);
     const diversity = Math.min(1, poiTypes.length / 3);
     const connectivityScore = Math.max(0, Math.min(1, connectivity));
     const length = Math.max(LENGTH_FACTOR_MIN, Math.min(1, lengthFactor || TS.lengthFactorFromRoundTrip(roundTripMinutes)));
-    const score = 0.45 * balanceScore + 0.25 * diversity + 0.20 * connectivityScore + 0.10 * length;
-    let grade = 'F';
-    if (score >= 0.85) grade = 'A';
-    else if (score >= 0.70) grade = 'B';
-    else if (score >= 0.55) grade = 'C';
-    else if (score >= 0.40) grade = 'D';
-    return { score, grade, balanceScore, diversity, connectivity: connectivityScore, lengthFactor: length };
+    const score = Math.max(0, Math.min(1, 0.45 * balanceScore + 0.25 * diversity + 0.20 * connectivityScore + 0.10 * length));
+    const band = bandForScore(score);
+    return { score, band, balanceScore, diversity, connectivity: connectivityScore, lengthFactor: length };
+  };
+
+  TS.routeBand = function (routeOrScore, world = {}) {
+    if (typeof routeOrScore === 'number') {
+      return bandForScore(routeOrScore);
+    }
+    if (routeOrScore && typeof routeOrScore.score === 'number' && !Array.isArray(routeOrScore.stops)) {
+      return bandForScore(routeOrScore.score);
+    }
+    const route = routeOrScore;
+    if (!route || !Array.isArray(route.stops) || route.stops.length < 2) {
+      return bandForScore(0);
+    }
+    const { metrics, estimateRouteDemand, connectivityMap, connectivity = 0 } = world || {};
+    let basis = null;
+    if (metrics) {
+      if (typeof metrics.get === 'function') {
+        basis = metrics.get(route.id) || null;
+      } else if (typeof metrics === 'object' && metrics !== null && metrics[route.id]) {
+        basis = metrics[route.id];
+      }
+    }
+    if (!basis && typeof estimateRouteDemand === 'function') {
+      basis = estimateRouteDemand(route) || null;
+    }
+    if (!basis) {
+      return bandForScore(0);
+    }
+    const conn = connectivityMap?.get?.(route.id) ?? basis.connectivity ?? connectivity;
+    const summary = TS.routePerformanceSummary({
+      resWeight: basis.resWeight ?? basis.res ?? 0,
+      destWeight: basis.destWeight ?? basis.dest ?? 0,
+      poiTypes: basis.poiTypesCovered ?? basis.poiTypes ?? [],
+      connectivity: conn ?? 0,
+      roundTripMinutes: basis.roundTripMinutes ?? 0,
+      lengthFactor: basis.lengthFactor
+    });
+    return summary.band;
+  };
+
+  TS.networkBand = function (routes = [], world = {}) {
+    if (!routes.length) return null;
+    const list = [];
+    const { metrics, estimateRouteDemand, connectivityMap, connectivity = 0 } = world;
+    routes.forEach(route => {
+      if (!route || !Array.isArray(route.stops) || route.stops.length < 2) return;
+      let basis = null;
+      if (metrics) {
+        if (typeof metrics.get === 'function') {
+          basis = metrics.get(route.id) || null;
+        } else if (typeof metrics === 'object' && metrics !== null && metrics[route.id]) {
+          basis = metrics[route.id];
+        }
+      }
+      if (!basis && typeof estimateRouteDemand === 'function') {
+        basis = estimateRouteDemand(route) || null;
+      }
+      if (!basis) return;
+      const conn = connectivityMap?.get?.(route.id) ?? basis.connectivity ?? connectivity;
+      const summary = TS.routePerformanceSummary({
+        resWeight: basis.resWeight ?? basis.res ?? 0,
+        destWeight: basis.destWeight ?? basis.dest ?? 0,
+        poiTypes: basis.poiTypesCovered ?? basis.poiTypes ?? [],
+        connectivity: conn ?? 0,
+        roundTripMinutes: basis.roundTripMinutes ?? 0,
+        lengthFactor: basis.lengthFactor
+      });
+      const weight = Number.isFinite(basis.perDay) ? Math.max(0, basis.perDay) : Number.isFinite(basis.ridersPerDay) ? Math.max(0, basis.ridersPerDay) : 1;
+      list.push({ score: summary.score, weight: weight > 0 ? weight : 1 });
+    });
+    if (!list.length) return null;
+    const totalWeight = list.reduce((sum, item) => sum + item.weight, 0);
+    if (totalWeight <= 0) {
+      return bandForScore(list.reduce((sum, item) => sum + item.score, 0) / list.length);
+    }
+    const avgScore = list.reduce((sum, item) => sum + item.score * item.weight, 0) / totalWeight;
+    return bandForScore(avgScore);
   };
 
   TS.priceFactor = function (fare) { return Math.pow(Math.max(0.5, Math.min(5, fare)) / FARE_REF, FARE_ELASTICITY); };
