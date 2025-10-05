@@ -13,6 +13,10 @@
     const run = km / Math.max(5, effSpeed);
     return Math.max(0.05, run * 2 + TURNAROUND_MIN / 60);
   };
+  TS.roundTripMinutes = function (stops, effSpeed = VEHICLE_SPEED_BASE) {
+    if (!stops || stops.length < 2) return 0;
+    return TS.cycleTimeHours(stops, effSpeed) * 60;
+  };
   TS.actualVehPerHour = function (target, fleetCap) {
     return Math.min(target, Math.floor(fleetCap));
   };
@@ -91,8 +95,14 @@
     const capPH = targetVPH * TS.VEHICLE_CAPACITY;
     perHour = Math.min(perHour, capPH);
     perHour *= (population / TS.START_POP);
+    const roundTripMinutes = TS.roundTripMinutes(stops, VEHICLE_SPEED_BASE);
+    const lengthFactor = Math.max(0.5, Math.min(1, 1 - 0.02 * Math.max(0, (roundTripMinutes - 20))));
+    perHour *= lengthFactor;
     const perDay = perHour * Math.max(0, serviceHours);
-    return { perHour, perDay, resWeight: res, destWeight: dest };
+    const totalWeight = res + dest;
+    const destShare = totalWeight > 0 ? dest / totalWeight : 0;
+    const destHeavy = destShare >= 0.75 && dest > 0 && res < dest * 0.33;
+    return { perHour, perDay, resWeight: res, destWeight: dest, destHeavy };
   };
 
   TS.priceFactor = function (fare) { return Math.pow(Math.max(0.5, Math.min(5, fare)) / FARE_REF, FARE_ELASTICITY); };
