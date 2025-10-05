@@ -14,17 +14,20 @@
 
   const { clamp, polylineLengthKm } = TS;
   const { generateLandUse } = TS;
-  const { generatePOIs, poiIcon, poiJobsBoost } = TS;
+  const { generatePOIs, poiIcon, poiJobsBoost, pickPOIType } = TS;
   const {
     spacingEfficiency, avgWaitMin, priceFactor, waitFactor,
     effSpeedFromLoad, roundTripMinutes, estimateRouteDemand, financesMinute,
-    cycleTimeHours, actualVehPerHour, capacityPerHour, demandPerHour
+    cycleTimeHours, actualVehPerHour, capacityPerHour, demandPerHour,
+    routeScoreAndGrade
   } = TS;
   const { useBanners, InfoTip, NumberStepper, MapToast } = TS;
 
   const { useEffect, useMemo, useState, useRef, useCallback } = React;
 
-  const ROUTE_COLORS = ['#ef4444','#3b82f6','#10b981','#f97316','#8b5cf6','#06b6d4'];
+  const ROUTE_COLORS = (TS.ROUTE_COLORS && TS.ROUTE_COLORS.length)
+    ? TS.ROUTE_COLORS
+    : ['#ef4444','#3b82f6','#10b981','#f97316','#8b5cf6','#06b6d4','#e11d48','#0ea5e9','#22c55e','#f59e0b'];
 
   function App(){
     TS.routeSeq = TS.routeSeq || 1;
@@ -65,7 +68,11 @@
     const [autoSkipIdle,setAutoSkipIdle]=useState(false);
 
     const [cellSize,setCellSize]=useState(INITIAL_CELL_SIZE);
+    const [visualPadding,setVisualPadding]=useState(0);
     const canvasSize = cellSize * GRID;
+    const displaySize = canvasSize + visualPadding * 2 * cellSize;
+    const mapOffset = visualPadding * cellSize;
+    const paddedGrid = GRID + visualPadding * 2;
     const mapContainerRef = useRef(null);
     const [settingsOpen,setSettingsOpen]=useState(false);
     const recomputeCellSize = useCallback(() => {
@@ -73,8 +80,12 @@
       if (!node) return;
       const { clientWidth, clientHeight } = node;
       if (!clientWidth || !clientHeight) return;
-      const dimension = Math.min(clientWidth, clientHeight);
-      const next = clamp(Math.floor(dimension / GRID), 12, 64);
+      const desired = Math.min(clientWidth, clientHeight);
+      const next = clamp(Math.floor(desired / GRID), 14, 64);
+      const nextCanvas = next * GRID;
+      const extraHeight = Math.max(0, clientHeight - nextCanvas);
+      const paddingCells = Math.max(0, Math.min(2, Math.floor(extraHeight / (2 * next))));
+      setVisualPadding(prev => (prev === paddingCells ? prev : paddingCells));
       setCellSize(prev => (prev === next ? prev : next));
     }, []);
 
@@ -113,6 +124,7 @@
     const banners = useBanners();
     const financeAccumulatorRef = useRef({ income:0, costs:0 });
     const destHeavyShownRef = useRef(false);
+    const lastPoiSpawnDayRef = useRef(0);
 
     const activeRoute = useMemo(() => routes.find(r => r.id === activeRouteId) || routes[0], [routes, activeRouteId]);
     const stops = activeRoute ? activeRoute.stops : [];
@@ -165,13 +177,40 @@
 
     const polylineFor = useCallback((points) => {
       if(!points || points.length < 2) return '';
-      return points.map(p => `${p.x*cellSize + cellSize/2},${p.y*cellSize + cellSize/2}`).join(' ');
-    }, [cellSize]);
+      const offset = mapOffset;
+      return points.map(p => `${p.x*cellSize + offset + cellSize/2},${p.y*cellSize + offset + cellSize/2}`).join(' ');
+    }, [cellSize, mapOffset]);
 
     const routeSummaries = useMemo(() => {
+      const stopSets = routes.map(route => new Set(route.stops.map(p => `${p.x},${p.y}`)));
       return routes.map((route, index) => {
         const estimate = routeEstimateMap.get(route.id) || null;
         const color = route.color || ROUTE_COLORS[index % ROUTE_COLORS.length];
+        let connectivity = 0;
+        if(route.stops.length >= 2){
+          for(let j=0; j<routes.length; j++){
+            const other = routes[j];
+            if(!other || other.id === route.id || other.stops.length < 2) continue;
+            const otherStops = stopSets[j];
+            if(!otherStops || otherStops.size === 0) continue;
+            let overlap = 0;
+            for(const stop of route.stops){
+              if(otherStops.has(`${stop.x},${stop.y}`)) overlap++;
+            }
+            const normalized = overlap / Math.max(1, route.stops.length - 1);
+            if(normalized > connectivity) connectivity = normalized;
+          }
+        }
+        const gradeInfo = (estimate && route.stops.length >= 2)
+          ? routeScoreAndGrade({
+              resWeight: estimate.resWeight,
+              destWeight: estimate.destWeight,
+              poiTypes: estimate.poiTypesCovered,
+              connectivity,
+              roundTripMinutes: estimate.roundTripMinutes,
+              lengthFactor: estimate.lengthFactor
+            })
+          : null;
         return {
           id: route.id,
           name: route.name,
@@ -179,12 +218,14 @@
           stops: route.stops,
           estimate,
           ridersPerDay: estimate ? Math.round(estimate.perDay) : null,
-          grade: estimate?.grade || null,
+          grade: route.stops.length >= 2 ? (gradeInfo?.grade ?? null) : null,
+          score: gradeInfo?.score ?? null,
+          connectivity,
           poiTypes: estimate?.poiTypesCovered || [],
           polyline: polylineFor(route.stops)
         };
       });
-    }, [routes, routeEstimateMap, polylineFor]);
+    }, [routes, routeEstimateMap, polylineFor, routeScoreAndGrade, ROUTE_COLORS]);
 
     const activeRouteSummary = useMemo(() => routeSummaries.find(r => r.id === activeRouteId) || null, [routeSummaries, activeRouteId]);
     const gradeOrder = ['F','D','C','B','A'];
@@ -208,6 +249,73 @@
       }
       destHeavyShownRef.current = heavy;
     }, [activeRoute, routeEstimateMap, banners]);
+
+    useEffect(() => {
+      const day = dayNumber;
+      if(day <= 1) return;
+      if(routes.every(route => route.stops.length < 2)) return;
+      const daysSince = day - lastPoiSpawnDayRef.current;
+      if(daysSince < 7) return;
+      const spawnChance = Math.min(0.03, daysSince * 0.005);
+      if(Math.random() >= spawnChance) return;
+      let added = false;
+      setPoiMap(prev => {
+        const coverageRadius = TS.COVERAGE_RADIUS || 3;
+        const coverage = new Map();
+        routes.forEach(route => {
+          route.stops.forEach(stop => {
+            for(let dy = -coverageRadius; dy <= coverageRadius; dy++){
+              for(let dx = -coverageRadius; dx <= coverageRadius; dx++){
+                const nx = stop.x + dx;
+                const ny = stop.y + dy;
+                if(nx < 0 || ny < 0 || nx >= GRID || ny >= GRID) continue;
+                const dist = Math.abs(dx) + Math.abs(dy);
+                if(dist > coverageRadius) continue;
+                const weight = Math.exp(-0.45 * dist);
+                const key = `${nx},${ny}`;
+                if(weight > (coverage.get(key) || 0)){
+                  coverage.set(key, weight);
+                }
+              }
+            }
+          });
+        });
+        if(!coverage.size) return prev;
+        const candidates = [];
+        coverage.forEach((coverageWeight, key) => {
+          if(prev.has(key)) return;
+          const [sx, sy] = key.split(',');
+          const x = Number(sx);
+          const y = Number(sy);
+          const jobs = land.jobs?.[y]?.[x] ?? 0;
+          const popVal = land.pop?.[y]?.[x] ?? 0;
+          const neighborKeys = [
+            `${x-1},${y}`,`${x+1},${y}`,`${x},${y-1}`,`${x},${y+1}`
+          ];
+          const nearbyPoi = neighborKeys.reduce((acc, k) => acc + (prev.has(k) ? 1 : 0), 0);
+          const weight = coverageWeight * (jobs * 1.6 + popVal * 0.6 + 1) + nearbyPoi * 0.5;
+          if(weight > 0) candidates.push({ key, weight, x, y });
+        });
+        if(!candidates.length) return prev;
+        const totalWeight = candidates.reduce((sum, c) => sum + c.weight, 0);
+        let roll = Math.random() * totalWeight;
+        let chosen = candidates[0];
+        for(const candidate of candidates){
+          roll -= candidate.weight;
+          if(roll <= 0){
+            chosen = candidate;
+            break;
+          }
+        }
+        const next = new Map(prev);
+        next.set(chosen.key, pickPOIType(population));
+        added = true;
+        return next;
+      });
+      if(added){
+        lastPoiSpawnDayRef.current = day;
+      }
+    }, [dayNumber, routes, land, population, pickPOIType]);
 
     // Build actions
     function handleCellClick(event,x,y){
@@ -394,14 +502,15 @@
     const hours = Math.floor(dayMinutes/60).toString().padStart(2,'0');
     const minutes = (dayMinutes%60).toString().padStart(2,'0');
     const serviceLabel = withinService ? 'In service' : 'Outside service';
-    const showJumpControl = !withinService && serviceHoursToday > 0;
+    const canJumpToServiceStart = serviceHoursToday > 0;
+    const fareLabel = `$${globalFare.toFixed(2)}`;
     const estimatedRidersPerDay = routeDemandEstimate ? Math.round(routeDemandEstimate.perDay) : null;
     const dailyIncome = lastDayFinance.income;
     const dailyCosts = lastDayFinance.costs;
     const dailyNet = lastDayFinance.net;
     const dailyNetClass = dailyNet >= 0 ? 'text-emerald-600' : 'text-rose-600';
     const speedOptions = [1,4,10];
-    const speedLabels = { 1: '▶ 1×', 4: '⏩ 4×', 10: '⏩⏩ 10×' };
+    const speedLabels = { 1: '1×', 4: '4×', 10: '10×' };
 
     const handleToggleRunning = () => {
       if(!running){
@@ -445,32 +554,29 @@
       if(typeof nextSeed === 'number'){
         setSeed(updatedSeed);
       }
+      lastPoiSpawnDayRef.current = 0;
     };
 
     const handleJumpToService = () => {
-      const startMin = serviceStartHour * 60;
-      const endMin = serviceEndHour * 60;
       if(serviceHoursToday <= 0) return;
+      const startMin = serviceStartHour * 60;
       setDayMinutes(dm => {
         if(dm < startMin){
           const advance = startMin - dm;
           setTotalMinutes(tm => tm + advance);
           return startMin;
         }
-        if(dm >= endMin){
-          const advance = (1440 - dm) + startMin;
-          setTotalMinutes(tm => {
-            const nextTotal = tm + advance;
-            const finance = financeAccumulatorRef.current;
-            const net = finance.income - finance.costs;
-            setLastDayFinance({ income: finance.income, costs: finance.costs, net });
-            financeAccumulatorRef.current = { income:0, costs:0 };
-            handleDayRollover(0, nextTotal);
-            return nextTotal;
-          });
-          setDayVehHours(0);
-          return startMin;
-        }
+        const advance = (1440 - dm) + startMin;
+        setTotalMinutes(tm => {
+          const nextTotal = tm + advance;
+          const finance = financeAccumulatorRef.current;
+          const net = finance.income - finance.costs;
+          setLastDayFinance({ income: finance.income, costs: finance.costs, net });
+          financeAccumulatorRef.current = { income:0, costs:0 };
+          handleDayRollover(0, nextTotal);
+          return nextTotal;
+        });
+        setDayVehHours(0);
         return startMin;
       });
     };
@@ -488,49 +594,72 @@
   return (
     <React.Fragment>
       <div className="relative min-h-screen w-full bg-slate-50 text-slate-900">
-        {banners.hudView}
-        <div className="absolute top-4 right-4 z-40 flex items-center gap-2 rounded-xl border bg-white/90 px-3 py-2 shadow">
-          <button
-            onClick={handleToggleRunning}
-            className={`rounded-lg border px-3 py-1.5 text-sm font-semibold ${running ? 'border-amber-400 bg-amber-100 text-amber-700' : 'border-sky-500 bg-sky-500 text-white hover:bg-sky-600'}`}
-          >
-            {running ? '⏸ Pause' : '▶ Play'}
-          </button>
-          {speedOptions.map(opt => (
-            <button
-              key={opt}
-              onClick={()=> setSpeed(opt)}
-              className={`rounded-lg border px-3 py-1.5 text-sm font-semibold ${speed===opt ? 'border-sky-400 bg-sky-100 text-sky-700' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-100'}`}
-            >
-              {speedLabels[opt]}
-            </button>
-          ))}
-          <button
-            onClick={()=> setSettingsOpen(true)}
-            className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-lg leading-none text-slate-600 hover:bg-slate-100"
-            aria-label="Open settings"
-          >
-            ⚙️
-          </button>
-        </div>
+          {banners.hudView}
+          <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/90 backdrop-blur">
+            <div className="mx-auto flex max-w-screen-2xl flex-wrap items-center justify-between gap-3 px-6 py-3">
+              <div className="flex flex-wrap items-center gap-2 text-sm text-slate-700">
+                <span
+                  className="inline-flex items-center rounded-full bg-slate-900 px-3 py-1 text-xs font-semibold text-white shadow-sm"
+                  title={`Fare ${fareLabel}`}
+                >
+                  Day {dayNumber} · {hours}:{minutes} — {serviceLabel}
+                </span>
+                <button
+                  onClick={handleToggleRunning}
+                  className={`rounded-lg border px-3 py-1.5 text-sm font-semibold transition-colors ${running ? 'border-amber-400 bg-amber-100 text-amber-700' : 'border-sky-500 bg-sky-500 text-white hover:bg-sky-600'}`}
+                >
+                  {running ? '⏸ Pause' : '▶ Play'}
+                </button>
+                {speedOptions.map(opt => (
+                  <button
+                    key={opt}
+                    onClick={()=> setSpeed(opt)}
+                    className={`rounded-lg border px-3 py-1.5 text-sm font-semibold transition-colors ${speed===opt ? 'border-sky-400 bg-sky-100 text-sky-700' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-100'}`}
+                  >
+                    {speedLabels[opt]}
+                  </button>
+                ))}
+                <button
+                  onClick={handleJumpToService}
+                  disabled={!canJumpToServiceStart}
+                  title={canJumpToServiceStart ? 'Jump to service start' : 'Service hours disabled'}
+                  className={`rounded-lg border px-3 py-1.5 text-sm font-semibold transition-colors ${canJumpToServiceStart ? 'border-slate-200 bg-white text-slate-700 hover:bg-slate-100' : 'cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400'}`}
+                >
+                  ⏭ Start
+                </button>
+                <button
+                  onClick={()=> setSettingsOpen(true)}
+                  className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-100"
+                >
+                  ⚙ Settings
+                </button>
+                <button
+                  onClick={()=> resetGame()}
+                  className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-100"
+                >
+                  Reset
+                </button>
+                <button
+                  onClick={()=> resetGame(seed + 1)}
+                  className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-100"
+                >
+                  New Map
+                </button>
+              </div>
+              <div className="text-xs font-semibold uppercase tracking-wide text-slate-600">Fare {fareLabel}</div>
+            </div>
+          </header>
 
-        <div className="mx-auto max-w-screen-2xl px-6 py-6">
-          <div className="flex flex-col items-center text-center">
-            <h1 className="text-2xl font-semibold tracking-tight">Transit Simulator</h1>
-            <p className="text-sm text-slate-600">Tutorial City · Population {population.toLocaleString()} · Goal: {MODE_SHARE_TARGET}% for {MODE_SHARE_STREAK_DAYS} days</p>
-            <p className="mt-1 text-sm text-slate-700">
-              Network Grade: <span className="font-semibold text-slate-900">{networkGrade ?? '—'}</span>
-            </p>
-          </div>
-          <div className="mt-4 flex flex-wrap items-center justify-center gap-3 text-sm text-slate-700 md:justify-start">
-            <span>Day {dayNumber} · {hours}:{minutes} — {serviceLabel}</span>
-            {showJumpControl && (
-              <button onClick={handleJumpToService} className="rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium hover:bg-slate-100">Jump to next service start</button>
-            )}
-          </div>
-        </div>
+          <main className="mx-auto max-w-screen-2xl px-6 py-6">
+            <div className="flex flex-col items-center text-center">
+              <h1 className="text-2xl font-semibold tracking-tight">Transit Simulator</h1>
+              <p className="text-sm text-slate-600">Tutorial City · Population {population.toLocaleString()} · Goal: {MODE_SHARE_TARGET}% for {MODE_SHARE_STREAK_DAYS} days</p>
+              <p className="mt-1 text-sm text-slate-700">
+                Network Grade: <span className="font-semibold text-slate-900">{networkGrade ?? '—'}</span>
+              </p>
+            </div>
 
-        <div className="grid h-[calc(100vh-6rem)] grid-cols-1 items-start gap-4 px-6 pb-10 sm:px-8 lg:grid-cols-[1fr_auto_1fr]">
+            <div className="grid h-[calc(100vh-8rem)] grid-cols-1 items-start gap-4 pt-6 pb-10 sm:px-2 lg:grid-cols-[1fr_auto_1fr]">
           <div className="order-2 flex h-full flex-col gap-4 overflow-y-auto rounded-2xl border border-slate-200 bg-white/90 p-4 shadow-sm lg:order-1">
             <div className="flex items-start justify-between">
               <div>
@@ -586,10 +715,6 @@
                 </div>
               </div>
             </div>
-            <div className="mt-auto flex flex-wrap gap-2">
-              <button onClick={()=> resetGame()} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium hover:bg-slate-100">Reset</button>
-              <button onClick={()=> resetGame(seed + 1)} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium hover:bg-slate-100">New Map</button>
-            </div>
           </div>
 
           <div className="order-1 flex h-full min-h-[420px] flex-col gap-4 lg:order-2">
@@ -603,89 +728,101 @@
                   {estimatedRidersPerDay ? `${estimatedRidersPerDay.toLocaleString()} riders/day` : 'Add stops to estimate'}
                 </div>
               </div>
-              <div ref={mapContainerRef} className="relative mt-3 flex-1 overflow-hidden rounded-2xl bg-slate-100">
-                <MapToast toasts={banners.mapQueue} onDismiss={banners.dismiss} />
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <div className="relative" style={{ width: canvasSize, height: canvasSize }}>
-                    <div className="absolute inset-0">
-                      {Array.from({ length: GRID }).map((_, y) => (
-                        <div key={y} className="flex">
-                          {Array.from({ length: GRID }).map((__, x) => {
-                            const p = land.pop[y][x], jb = land.jobs[y][x], poi = poiMap.get(`${x},${y}`);
-                            const bg = p===0? '#EFF6FF' : p===1? '#DBEAFE' : p===2? '#BFDBFE' : '#93C5FD';
-                            const outline = jb>0 ? '1px solid rgba(234,179,8,0.25)' : '1px solid rgba(2,6,23,0.06)';
-                            return (
-                              <div
-                                key={`${x}-${y}`}
-                                onClick={(e)=> handleCellClick(e,x,y)}
-                                style={{ width: cellSize, height: cellSize, backgroundColor:bg, outline, cursor:'crosshair', position:'relative' }}
-                              >
-                                {poi && <div style={{position:'absolute', inset:'0', display:'grid', placeItems:'center', fontSize:'12px'}}>{poiIcon(poi)}</div>}
-                              </div>
-                            );
-                          })}
+                <div className="mt-3 flex-1">
+                  <div ref={mapContainerRef} className="relative flex h-full w-full overflow-hidden rounded-2xl bg-slate-100">
+                    <MapToast toasts={banners.mapQueue} onDismiss={banners.dismiss} />
+                    <div className="grid h-full w-full place-items-center">
+                      <div className="relative" style={{ width: displaySize, height: displaySize }}>
+                        <div className="absolute inset-0">
+                          {Array.from({ length: paddedGrid }).map((_, y) => (
+                            <div key={y} className="flex">
+                              {Array.from({ length: paddedGrid }).map((__, x) => {
+                                const gridX = x - visualPadding;
+                                const gridY = y - visualPadding;
+                                const isRealCell = gridX >= 0 && gridX < GRID && gridY >= 0 && gridY < GRID;
+                                const key = `${gridX},${gridY}`;
+                                const popVal = isRealCell ? land.pop[gridY][gridX] : 0;
+                                const jobsVal = isRealCell ? land.jobs[gridY][gridX] : 0;
+                                const poi = isRealCell ? poiMap.get(key) : null;
+                                const bg = isRealCell
+                                  ? (popVal===0? '#EFF6FF' : popVal===1? '#DBEAFE' : popVal===2? '#BFDBFE' : '#93C5FD')
+                                  : '#F8FAFC';
+                                const outline = isRealCell
+                                  ? (jobsVal>0 ? '1px solid rgba(234,179,8,0.25)' : '1px solid rgba(15,23,42,0.06)')
+                                  : '1px solid rgba(148,163,184,0.25)';
+                                return (
+                                  <div
+                                    key={`${x}-${y}`}
+                                    onClick={isRealCell ? (e)=> handleCellClick(e, gridX, gridY) : undefined}
+                                    style={{ width: cellSize, height: cellSize, backgroundColor:bg, outline, cursor: isRealCell ? 'crosshair' : 'default', position:'relative' }}
+                                  >
+                                    {poi && <div style={{position:'absolute', inset:'0', display:'grid', placeItems:'center', fontSize:'12px'}}>{poiIcon(poi)}</div>}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          ))}
                         </div>
-                      ))}
-                    </div>
-                    <svg
-                      className="absolute inset-0 h-full w-full"
-                      width={canvasSize}
-                      height={canvasSize}
-                      viewBox={`0 0 ${canvasSize} ${canvasSize}`}
-                      preserveAspectRatio="none"
-                      style={{ pointerEvents:'none' }}
-                    >
-                      {routeSummaries.map(summary => (
-                        summary.polyline && (
-                          <polyline
-                            key={summary.id}
-                            points={summary.polyline}
-                            fill="none"
-                            stroke={summary.color}
-                            strokeWidth={summary.id === activeRouteId ? 4 : 2}
-                            strokeLinejoin="round"
-                            strokeLinecap="round"
-                            strokeOpacity={summary.id === activeRouteId ? 1 : 0.4}
-                          />
-                        )
-                      ))}
-                    </svg>
-                    {routeSummaries.map(summary => (
-                      summary.stops.map((point, idx) => (
-                        <div
-                          key={`${summary.id}-${idx}`}
-                          className="absolute -translate-x-1/2 -translate-y-1/2"
-                          style={{ left: point.x * cellSize + cellSize/2, top: point.y * cellSize + cellSize/2 }}
+                        <svg
+                          className="absolute inset-0 h-full w-full"
+                          width={displaySize}
+                          height={displaySize}
+                          viewBox={`0 0 ${displaySize} ${displaySize}`}
+                          preserveAspectRatio="none"
+                          style={{ pointerEvents:'none' }}
                         >
-                          <div
-                            className={`rounded-full border-2 ${summary.id === activeRouteId ? 'h-3.5 w-3.5' : 'h-2.5 w-2.5 opacity-80'}`}
-                            style={{ borderColor: summary.color, backgroundColor: summary.id === activeRouteId ? summary.color : '#fff' }}
-                          />
-                        </div>
-                      ))
-                    ))}
+                          {routeSummaries.map(summary => (
+                            summary.polyline && (
+                              <polyline
+                                key={summary.id}
+                                points={summary.polyline}
+                                fill="none"
+                                stroke={summary.color}
+                                strokeWidth={summary.id === activeRouteId ? 4 : 2}
+                                strokeLinejoin="round"
+                                strokeLinecap="round"
+                                strokeOpacity={summary.id === activeRouteId ? 1 : 0.45}
+                              />
+                            )
+                          ))}
+                        </svg>
+                        {routeSummaries.map(summary => (
+                          summary.stops.map((point, idx) => (
+                            <div
+                              key={`${summary.id}-${idx}`}
+                              className="absolute -translate-x-1/2 -translate-y-1/2"
+                              style={{ left: point.x * cellSize + mapOffset + cellSize/2, top: point.y * cellSize + mapOffset + cellSize/2 }}
+                            >
+                              <div
+                                className={`rounded-full border-2 ${summary.id === activeRouteId ? 'h-3.5 w-3.5' : 'h-2.5 w-2.5 opacity-80'}`}
+                                style={{ borderColor: summary.color, backgroundColor: summary.id === activeRouteId ? summary.color : '#fff' }}
+                              />
+                            </div>
+                          ))
+                        ))}
+                      </div>
+                    </div>
                   </div>
                 </div>
-                <p className="pointer-events-none mt-3 text-center text-xs text-slate-500">Click to add stops · Shift-click to remove · Each route can be edited when paused.</p>
-              </div>
-              <div className="mt-4 rounded-2xl border border-slate-200 bg-white/80 p-3 text-xs text-slate-600">
-                <div className="text-sm font-semibold text-slate-900">Route Legend</div>
-                <div className="mt-2 space-y-2">
-                  {routeSummaries.map(summary => (
-                    <div key={summary.id} className="flex items-center justify-between gap-3 rounded-xl bg-slate-50 px-3 py-2">
-                      <div className="flex items-center gap-2">
-                        <span className="inline-flex h-2.5 w-2.5 rounded-full" style={{ backgroundColor: summary.color }} />
-                        <span className="text-sm font-medium text-slate-900">{summary.name}</span>
+                <p className="mt-2 text-center text-xs text-slate-500">Click to add · Shift-click to remove · Edit when paused</p>
+                <div className="mt-3 max-h-28 overflow-auto border-t pt-2 text-xs text-slate-600">
+                  <div className="text-sm font-semibold text-slate-900">Route Legend</div>
+                  <div className="mt-2 space-y-2 pr-1">
+                    {routeSummaries.map(summary => (
+                      <div key={summary.id} className="flex items-center justify-between gap-3 rounded-xl bg-slate-50 px-3 py-2">
+                        <div className="flex items-center gap-2">
+                          <span className="inline-flex h-2.5 w-2.5 rounded-full" style={{ backgroundColor: summary.color }} />
+                          <span className="text-sm font-medium text-slate-900">{summary.name}</span>
+                        </div>
+                        <div className="flex items-center gap-3 text-xs font-semibold text-slate-900">
+                          <span>{summary.ridersPerDay !== null ? `${summary.ridersPerDay.toLocaleString()} / day` : '—'}</span>
+                          <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-white text-[11px] font-bold text-slate-700">{summary.grade ?? '–'}</span>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-3 text-xs font-semibold text-slate-900">
-                        <span>{summary.ridersPerDay !== null ? `${summary.ridersPerDay.toLocaleString()} / day` : '—'}</span>
-                        <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-white text-[11px] font-bold text-slate-700">{summary.grade ?? '–'}</span>
-                      </div>
-                    </div>
-                  ))}
-                  {!routeSummaries.length && <div className="text-center text-xs text-slate-500">No routes yet — add one to begin planning.</div>}
+                    ))}
+                    {!routeSummaries.length && <div className="text-center text-xs text-slate-500">No routes yet — add one to begin planning.</div>}
+                  </div>
                 </div>
-              </div>
             </div>
           </div>
 
@@ -774,9 +911,11 @@
               </div>
             </div>
           </div>
-        </div>
+          </div>
 
-        {settingsOpen && (
+          </main>
+
+          {settingsOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4">
             <div className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-6 shadow-xl">
               <div className="flex items-center justify-between">
@@ -808,7 +947,7 @@
             </div>
           </div>
         )}
-      </div>
+        </div>
     </React.Fragment>
   );
   }
