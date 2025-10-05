@@ -197,10 +197,13 @@ function App(){
       <h1 className="text-2xl font-semibold tracking-tight">Transit Simulator – Tutorial City</h1>
       <p className="text-sm text-slate-600">Population {population.toLocaleString()} • Goal: {MODE_SHARE_TARGET}% for {MODE_SHARE_STREAK_DAYS} days</p>
 
-      <div className="mt-4 grid gap-4 grid-cols-1 lg:grid-cols-[auto_520px] xl:grid-cols-[260px_520px_260px] xl:items-stretch">
+      <div className="mt-4 grid gap-4 grid-cols-1 lg:grid-cols-[auto_520px] xl:grid-cols-[minmax(320px,1fr)_520px_minmax(320px,1fr)] xl:items-stretch">
         {/* Map */}
-        <div className="order-1 xl:order-2 flex justify-center xl:h-full">
-          <div className="relative rounded-2xl overflow-hidden border border-slate-200 bg-white shadow-sm" style={{ width: CANVAS_SIZE, height: CANVAS_SIZE }}>
+        <div className="order-1 xl:order-2 flex justify-center xl:self-stretch xl:h-full">
+          <div
+            className="relative aspect-square w-full h-full rounded-2xl overflow-hidden border border-slate-200 bg-white shadow-sm"
+            style={{ maxWidth: CANVAS_SIZE, maxHeight: CANVAS_SIZE }}
+          >
             <div className="absolute inset-0">
               {Array.from({length:GRID}).map((_,y)=>(
                 <div key={y} className="flex">
@@ -218,7 +221,14 @@ function App(){
                 </div>
               ))}
             </div>
-            <svg className="absolute inset-0" width={CANVAS_SIZE} height={CANVAS_SIZE} style={{ pointerEvents:'none' }}>
+            <svg
+              className="absolute inset-0 h-full w-full"
+              width={CANVAS_SIZE}
+              height={CANVAS_SIZE}
+              viewBox={`0 0 ${CANVAS_SIZE} ${CANVAS_SIZE}`}
+              preserveAspectRatio="none"
+              style={{ pointerEvents:'none' }}
+            >
               {stops.length>=2 && <polyline points={polyline} fill="none" stroke="#0ea5e9" strokeWidth={4} strokeLinejoin="round" strokeLinecap="round" />}
             </svg>
             {stops.map((p,i)=>(
