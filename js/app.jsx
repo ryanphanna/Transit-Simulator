@@ -33,7 +33,8 @@ function App(){
   const [stops,setStops]=useState([]);
   const [running,setRunning]=useState(false);
   const [autoStarted,setAutoStarted]=useState(false);
-  const [dayMinutes,setDayMinutes]=useState(0);
+  const defaultStartMinutes = DEFAULT_SERVICE_START_HOUR * 60;
+  const [dayMinutes,setDayMinutes]=useState(defaultStartMinutes);
   const [totalMinutes,setTotalMinutes]=useState(0);
   const [serviceStartHour,setServiceStartHour]=useState(DEFAULT_SERVICE_START_HOUR);
   const [serviceEndHour,setServiceEndHour]=useState(DEFAULT_SERVICE_END_HOUR);
@@ -126,7 +127,8 @@ function App(){
 
       const nm=dayMinutes + SIM_MINUTES_PER_TICK, tm=totalMinutes + SIM_MINUTES_PER_TICK;
       const rollover = nm >= 1440;
-      setDayMinutes(rollover? 0 : nm);
+      const nextDayMinutes = rollover ? (nm % 1440) : nm;
+      setDayMinutes(nextDayMinutes);
       setTotalMinutes(tm);
       setDayVehHours(rollover ? addVehHours : newDayVehHrs);
 
@@ -173,7 +175,7 @@ function App(){
     setDepotCap(DEPOT_BASE_CAPACITY);
     setAvgBusAge(3);
     setDrivers(20);
-    setDayMinutes(0);
+    setDayMinutes(defaultStartMinutes);
     setTotalMinutes(0);
     setDayVehHours(0);
     setEffSpeed(VEHICLE_SPEED_BASE);
