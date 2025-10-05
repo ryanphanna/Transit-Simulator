@@ -28,4 +28,17 @@
     );
     return { show, view };
   };
+
+  TS.InfoTip = function InfoTip({ text }) {
+    return (
+      <span className="ml-1 inline-flex items-center justify-center align-middle">
+        <span
+          className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-slate-200 text-[10px] font-semibold text-slate-600"
+          title={text}
+        >
+          ?
+        </span>
+      </span>
+    );
+  };
 })(window);
