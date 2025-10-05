@@ -8,6 +8,10 @@
   } = TS;
   const { polylineLengthKm } = TS;
 
+  const LENGTH_FACTOR_THRESHOLD_MIN = 20;
+  const LENGTH_FACTOR_DECAY_PER_MIN = 0.02;
+  const LENGTH_FACTOR_MIN = 0.5;
+
   TS.cycleTimeHours = function (stops, effSpeed) {
     const km = polylineLengthKm(stops);
     const run = km / Math.max(5, effSpeed);
@@ -16,6 +20,11 @@
   TS.roundTripMinutes = function (stops, effSpeed = VEHICLE_SPEED_BASE) {
     if (!stops || stops.length < 2) return 0;
     return TS.cycleTimeHours(stops, effSpeed) * 60;
+  };
+  TS.lengthFactorFromRoundTrip = function (roundTripMinutes) {
+    const extraMinutes = Math.max(0, roundTripMinutes - LENGTH_FACTOR_THRESHOLD_MIN);
+    const factor = 1 - LENGTH_FACTOR_DECAY_PER_MIN * extraMinutes;
+    return Math.max(LENGTH_FACTOR_MIN, Math.min(1, factor));
   };
   TS.actualVehPerHour = function (target, fleetCap) {
     return Math.min(target, Math.floor(fleetCap));
@@ -81,7 +90,10 @@
     const popScale = population / START_POP;
     const spacing = TS.spacingEfficiency(stops);
 
-    return odPotential * BASE_DEMAND_PER_CELL_PER_HOUR * spacing * popScale;
+    let perHour = odPotential * BASE_DEMAND_PER_CELL_PER_HOUR * spacing * popScale;
+    const roundTripMinutes = TS.roundTripMinutes(stops, VEHICLE_SPEED_BASE);
+    perHour *= TS.lengthFactorFromRoundTrip(roundTripMinutes);
+    return perHour;
   };
 
   TS.estimateRouteDemand = function ({ stops, land, population, poiMap, fare, targetVPH, serviceHours }) {
@@ -97,8 +109,7 @@
     perHour = Math.min(perHour, capPH);
     perHour *= (population / TS.START_POP);
     const roundTripMinutes = TS.roundTripMinutes(stops, VEHICLE_SPEED_BASE);
-    const lengthFactor = Math.max(0.5, Math.min(1, 1 - 0.02 * Math.max(0, (roundTripMinutes - 20))));
-    perHour *= lengthFactor;
+    perHour *= TS.lengthFactorFromRoundTrip(roundTripMinutes);
     const perDay = perHour * Math.max(0, serviceHours);
     const totalWeight = res + dest;
     const destShare = totalWeight > 0 ? dest / totalWeight : 0;
