@@ -59,7 +59,7 @@
     );
   };
 
-  TS.NumberStepper = function NumberStepper({ value, onChange, min, max, step = 1, format = (v) => String(v) }) {
+  TS.NumberStepper = function NumberStepper({ value, onChange, min, max, step = 1, format = (v) => String(v), showValueLabel = true }) {
     const lower = typeof min === 'number' ? min : -Infinity;
     const upper = typeof max === 'number' ? max : Infinity;
     const normalize = (next) => {
@@ -92,7 +92,9 @@
         >
           +
         </button>
-        <span className="ml-2 text-sm text-slate-700">{format(value)}</span>
+        {showValueLabel && (
+          <span className="ml-2 text-sm text-slate-700">{format(value)}</span>
+        )}
       </div>
     );
   };

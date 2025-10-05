@@ -850,14 +850,14 @@
       <div className="relative min-h-screen w-full bg-gradient-to-b from-sky-50 via-emerald-50/40 to-white text-slate-900">
           {banners.hudView}
           <header className="sticky top-0 z-40 border-b border-emerald-100/60 bg-white/80 backdrop-blur">
-            <div className="mx-auto flex max-w-screen-2xl flex-wrap items-center justify-between gap-4 px-6 py-3">
-              <div className="flex flex-wrap items-center gap-3 text-sm text-slate-700">
-                <span className="text-sm font-semibold text-slate-900">
+            <div className="mx-auto flex w-full max-w-screen-2xl flex-wrap items-center justify-between gap-4 px-6 py-3 text-sm text-slate-700 md:px-10 lg:px-14">
+              <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+                <span className="font-semibold text-slate-900">
                   Day {dayNumber} · {hours}:{minutes} — {serviceLabel}
                 </span>
                 <button
                   onClick={handleToggleRunning}
-                  className={`rounded-lg border px-3 py-1.5 text-sm font-semibold transition-colors ${running ? 'border-amber-400 bg-amber-100 text-amber-700' : 'border-emerald-500 bg-emerald-500 text-white hover:bg-emerald-600'}`}
+                  className={`rounded-lg border px-3 py-1.5 font-semibold transition-colors ${running ? 'border-amber-400 bg-amber-100 text-amber-700' : 'border-emerald-500 bg-emerald-500 text-white hover:bg-emerald-600'}`}
                 >
                   {running ? '⏸ Pause' : '▶ Play'}
                 </button>
@@ -866,46 +866,48 @@
                     <button
                       key={opt}
                       onClick={()=> setSpeed(opt)}
-                      className={`rounded-lg border px-3 py-1.5 text-sm font-semibold transition-colors ${speed===opt ? 'border-emerald-300 bg-emerald-100 text-emerald-700' : 'border-emerald-100/70 bg-white/80 text-slate-700 hover:bg-emerald-50/40'}`}
+                      className={`rounded-lg border px-3 py-1.5 font-semibold transition-colors ${speed===opt ? 'border-emerald-300 bg-emerald-100 text-emerald-700' : 'border-emerald-100/70 bg-white/80 text-slate-700 hover:bg-emerald-50/40'}`}
                     >
                       {speedLabels[opt]}
                     </button>
                   ))}
                 </div>
-              </div>
-              <div className="flex flex-wrap items-center gap-2 text-sm text-slate-700">
                 <button
                   onClick={handleJumpToService}
                   disabled={!canJumpToServiceStart}
                   title={canJumpToServiceStart ? 'Jump to service start' : 'Service hours disabled'}
-                  className={`rounded-lg border px-3 py-1.5 text-sm font-semibold transition-colors ${canJumpToServiceStart ? 'border-emerald-100/70 bg-white/80 text-slate-700 hover:bg-emerald-50/40' : 'cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400'}`}
+                  className={`rounded-lg border px-3 py-1.5 font-semibold transition-colors ${canJumpToServiceStart ? 'border-emerald-100/70 bg-white/80 text-slate-700 hover:bg-emerald-50/40' : 'cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400'}`}
                 >
-                  ⏭ Start
+                  ⏭ Jump
                 </button>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="inline-flex items-center gap-2 rounded-lg border border-emerald-100/70 bg-white/80 px-3 py-1.5 font-semibold text-emerald-700">
+                  💲 Fare {fareLabel}
+                </span>
                 <button
                   onClick={()=> setSettingsOpen(true)}
-                  className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 transition-colors hover:bg-emerald-50/40"
+                  className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 font-semibold text-slate-700 transition-colors hover:bg-emerald-50/40"
                 >
                   ⚙ Settings
                 </button>
                 <button
                   onClick={()=> resetGame()}
-                  className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 transition-colors hover:bg-emerald-50/40"
+                  className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 font-semibold text-slate-700 transition-colors hover:bg-emerald-50/40"
                 >
-                  Reset
+                  🔁 Reset
                 </button>
                 <button
                   onClick={()=> resetGame(seed + 1)}
-                  className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 transition-colors hover:bg-emerald-50/40"
+                  className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 font-semibold text-slate-700 transition-colors hover:bg-emerald-50/40"
                 >
-                  New Map
+                  🗺️ New Map
                 </button>
-                <span className="ml-2 text-xs font-semibold uppercase tracking-wide text-slate-600">Fare {fareLabel}</span>
               </div>
             </div>
           </header>
 
-          <main className="mx-auto max-w-screen-2xl px-6 py-6">
+          <main className="mx-auto w-full max-w-screen-2xl px-6 py-6 md:px-10 lg:px-14">
             <div className="flex flex-col items-center text-center">
               <h1 className="text-2xl font-semibold tracking-tight text-emerald-800">Transit Simulator</h1>
               <p className="text-sm text-slate-600">Tutorial City · Population {population.toLocaleString()} · Goal: {MODE_SHARE_TARGET}% for {MODE_SHARE_STREAK_DAYS} days</p>
@@ -914,7 +916,7 @@
               </p>
             </div>
 
-            <div className="grid h-[calc(100vh-8rem)] grid-cols-1 items-start gap-4 pt-6 pb-10 sm:px-2 lg:grid-cols-[320px_minmax(0,1fr)_340px]">
+            <div className="grid min-h-[calc(100vh-8rem)] grid-cols-1 items-stretch gap-6 pt-6 pb-12 sm:px-2 lg:grid-cols-[320px_minmax(0,1fr)_340px]">
               <aside className="order-2 flex h-full flex-col gap-4 overflow-y-auto rounded-2xl border border-emerald-100/60 bg-white/85 p-4 shadow-sm lg:order-1">
                 <div>
                   <div className="text-xs uppercase text-slate-500">Cash</div>
@@ -972,7 +974,7 @@
                   </div>
                 </div>
               </aside>
-              <section className="order-1 flex h-full min-h-[420px] flex-col rounded-2xl border border-emerald-100/60 bg-white/85 p-4 shadow-sm lg:order-2">
+              <section className="order-1 flex h-full min-h-[420px] min-w-0 flex-col gap-4 rounded-2xl border border-emerald-100/60 bg-white/85 p-4 shadow-sm lg:order-2">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
                     <span className="inline-flex h-3 w-3 rounded-full" style={{ backgroundColor: activeRouteSummary?.color || '#0ea5e9' }} />
@@ -983,14 +985,14 @@
                     <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-emerald-100/80 text-[11px] font-bold text-emerald-700">{activeRouteSummary?.grade ?? '–'}</span>
                   </div>
                 </div>
-                <div className="mt-2 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-600">
+                <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-slate-600">
                   <span className={`font-semibold ${activeThrottled ? 'text-amber-600' : 'text-slate-700'}`}>
                     {activeActualVPH.toFixed(1)} / <span className={activeThrottled ? 'text-slate-400' : 'text-slate-500'}>{activeTargetVPH.toFixed(1)}</span> veh/hr
                   </span>
                   <span>Round trip {activeRoundTripMinutes ? `${activeRoundTripMinutes} min` : '—'}</span>
                 </div>
-                <div className="mt-3 flex-1">
-                  <div ref={mapContainerRef} className="relative flex h-full w-full overflow-hidden rounded-2xl bg-gradient-to-br from-emerald-50/70 via-sky-50 to-white">
+                <div className="flex flex-1 min-h-0 flex-col gap-3">
+                  <div ref={mapContainerRef} className="relative flex w-full flex-1 items-center justify-center overflow-hidden rounded-2xl bg-gradient-to-br from-emerald-50/70 via-sky-50 to-white">
                     <MapToast toasts={banners.mapQueue} onDismiss={banners.dismiss} />
                     <div className="grid h-full w-full place-items-center">
                       <div className="relative" style={{ width: displaySize, height: displaySize }}>
@@ -1081,8 +1083,27 @@
                       </div>
                     </div>
                   </div>
+                  {routeSummaries.length > 0 && (
+                    <div className="lg:hidden">
+                      <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Route Legend</div>
+                      <div className="mt-2 max-h-28 space-y-2 overflow-auto pr-1">
+                        {routeSummaries.map(summary => (
+                          <div
+                            key={summary.id}
+                            className="flex items-center justify-between gap-3 rounded-xl border border-emerald-100/70 bg-white/80 px-3 py-2 text-xs text-slate-600"
+                          >
+                            <span className="flex items-center gap-2">
+                              <span className="inline-flex h-2.5 w-2.5 rounded-full" style={{ backgroundColor: summary.color }} />
+                              <span className="font-medium text-slate-700">{summary.name}</span>
+                            </span>
+                            <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-emerald-100/80 text-[11px] font-semibold text-emerald-700">{summary.grade ?? '–'}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  <p className="text-center text-xs text-slate-500">Click to add stops · Shift removes · Pause to tweak at your own pace</p>
                 </div>
-                <p className="mt-2 text-center text-xs text-slate-500">Click to add stops · Shift removes · Pause to tweak at your own pace</p>
               </section>
               <aside className="order-3 flex h-full flex-col gap-4 overflow-y-auto rounded-2xl border border-emerald-100/60 bg-white/85 p-4 shadow-sm lg:order-3">
                 <div>
@@ -1153,15 +1174,20 @@
 
                 <div className="rounded-2xl border border-emerald-100/60 bg-white/80 p-4 text-xs text-slate-700 shadow-sm">
                   <div className="text-sm font-medium text-slate-900">Fare & Policy</div>
-                  <div className="mt-3">
+                  <div className="mt-3 space-y-2">
+                    <div className="flex items-center justify-between text-sm font-medium text-slate-700">
+                      <span>Global Fare</span>
+                      <span className="font-semibold text-emerald-600">{fareLabel}</span>
+                    </div>
                     <NumberStepper
                       value={globalFare}
                       min={1.5}
                       max={3.0}
                       step={0.05}
                       onChange={setGlobalFare}
-                      format={(v)=> `$${Number(v).toFixed(2)}`}
+                      showValueLabel={false}
                     />
+                    <div className="text-xs text-slate-500">Range: $1.50 – $3.00</div>
                   </div>
                 </div>
 
