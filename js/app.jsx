@@ -29,6 +29,26 @@
     ? TS.ROUTE_COLORS
     : ['#ef4444','#3b82f6','#10b981','#f97316','#8b5cf6','#06b6d4','#e11d48','#0ea5e9','#22c55e','#f59e0b'];
   const DEFAULT_TARGET_VPH = 6;
+  const TILE_BASE_COLORS = ['#f5fbff', '#e3f7f3', '#d0efe8', '#c1e4dd'];
+  const TILE_DENSITY_TINT = '#3aaea1';
+  const JOB_OUTLINE_COLOR = 'rgba(255, 196, 120, 0.45)';
+  const IDLE_OUTLINE_COLOR = 'rgba(30, 64, 86, 0.08)';
+
+  const mixHexColor = (hexA, hexB, t) => {
+    const blend = Math.min(1, Math.max(0, Number.isFinite(t) ? t : 0));
+    const clamp = (v) => Math.min(255, Math.max(0, v));
+    const parse = (hex) => [
+      parseInt(hex.slice(1, 3), 16),
+      parseInt(hex.slice(3, 5), 16),
+      parseInt(hex.slice(5, 7), 16)
+    ];
+    const [r1, g1, b1] = parse(hexA);
+    const [r2, g2, b2] = parse(hexB);
+    const mix = (a, b) => clamp(Math.round(a + (b - a) * blend));
+    return `#${[mix(r1, r2), mix(g1, g2), mix(b1, b2)].map((v) => v.toString(16).padStart(2, '0')).join('')}`;
+  };
+
+  const createDensityGrid = () => Array.from({ length: GRID }, () => Array(GRID).fill(0));
 
   function App(){
     TS.routeSeq = TS.routeSeq || 1;
@@ -40,6 +60,7 @@
     const land=useMemo(()=> generateLandUse(seed),[seed]);
     const [poiMap,setPoiMap]=useState(()=> generatePOIs(seed, START_POP));
     useEffect(()=> setPoiMap(generatePOIs(seed, population)), [seed, population]);
+    const [densityLevels, setDensityLevels] = useState(() => createDensityGrid());
 
     const [routes,setRoutes]=useState(()=>[
       { id: initialRouteId, name: `Route ${TS.routeSeq}`, stops: [], color: ROUTE_COLORS[0], targetVPH: DEFAULT_TARGET_VPH }
@@ -57,6 +78,7 @@
     const [serviceStartHour,setServiceStartHour]=useState(DEFAULT_SERVICE_START_HOUR);
     const [serviceEndHour,setServiceEndHour]=useState(DEFAULT_SERVICE_END_HOUR);
     const [speed,setSpeed]=useState(1);
+    const [busAnim, setBusAnim] = useState({ loopDistance: 0 });
 
     // Ops
     const [fleet,setFleet]=useState(INITIAL_FLEET);
@@ -111,6 +133,26 @@
       TS.CANVAS_SIZE = cellSize * GRID;
     }, [cellSize]);
 
+    useEffect(() => {
+      if(!running) return;
+      const interval = setInterval(() => {
+        const activeStops = stopsRef.current || [];
+        if(activeStops.length < 2){
+          setBusAnim(prev => (prev.loopDistance === 0 ? prev : { loopDistance: 0 }));
+          return;
+        }
+        const totalSegments = Math.max(1, activeStops.length - 1);
+        const loopLength = totalSegments * 2;
+        const delta = 0.12 * Math.max(0.55, speed / 4);
+        setBusAnim(prev => {
+          const current = prev?.loopDistance || 0;
+          const next = loopLength > 0 ? (current + delta) % loopLength : 0;
+          return { loopDistance: next };
+        });
+      }, 120);
+      return () => clearInterval(interval);
+    }, [running, speed]);
+
     // Finance / outputs
     const [cash,setCash]=useState(STARTING_CASH);
     const [ridershipHour,setRidershipHour]=useState(0);
@@ -125,9 +167,14 @@
     const financeAccumulatorRef = useRef({ income:0, costs:0 });
     const destHeavyShownRef = useRef(false);
     const lastPoiSpawnDayRef = useRef(0);
+    const densityDayRef = useRef(1);
+    const ridershipMilestoneRef = useRef(0);
 
     const activeRoute = useMemo(() => routes.find(r => r.id === activeRouteId) || routes[0], [routes, activeRouteId]);
     const stops = activeRoute ? activeRoute.stops : [];
+    const stopsRef = useRef(stops);
+    useEffect(() => { stopsRef.current = stops; }, [stops]);
+    useEffect(() => { setBusAnim({ loopDistance: 0 }); }, [activeRouteId, stops.length]);
 
     const updateActiveRoute = useCallback((mutator) => {
       setRoutes(prev => prev.map(route => {
@@ -350,7 +397,7 @@
       const estimate = activeRoute ? routeEstimateMap.get(activeRoute.id) : null;
       const heavy = !!estimate?.destHeavy;
       if(heavy && !destHeavyShownRef.current){
-        banners.show({ target:'map', type:'warn', text:'Mostly destinations; connect homes to grow ridership.'});
+        banners.show({ target:'map', type:'warn', text:'Lots of destinations here — weave in some homes to keep riders happy.'});
       }
       destHeavyShownRef.current = heavy;
     }, [activeRoute, routeEstimateMap, banners]);
@@ -359,7 +406,7 @@
     useEffect(() => {
       const anyThrottled = routeSummaries.some(summary => summary.throttled && summary.targetVPH > 0);
       if(anyThrottled && !throttledToastRef.current){
-        banners.show({ target:'map', type:'info', text:'Frequency limited by fleet/drivers.'});
+        banners.show({ target:'map', type:'info', text:'Fleet is catching its breath — add buses or drivers to boost frequency.'});
       }
       throttledToastRef.current = anyThrottled;
     }, [routeSummaries, banners]);
@@ -431,10 +478,42 @@
       }
     }, [dayNumber, routes, land, population, pickPOIType]);
 
+    useEffect(() => {
+      const currentDay = Math.floor(totalMinutes / 1440) + 1;
+      if(currentDay === densityDayRef.current) return;
+      densityDayRef.current = currentDay;
+      setDensityLevels(prev => {
+        const faded = prev.map(row => row.map(value => Math.max(0, value * 0.94)));
+        const next = faded.map(row => [...row]);
+        const growthRoutes = enrichedRoutes.filter(info => (info.servedPerDay || 0) >= 600);
+        if(!growthRoutes.length) return next;
+        const coverageRadius = (TS.COVERAGE_RADIUS || 3) + 1;
+        growthRoutes.forEach(info => {
+          const served = info.servedPerDay || 0;
+          const intensityBase = Math.min(1.15, served / 8000);
+          info.stops.forEach(stop => {
+            for(let dy = -coverageRadius; dy <= coverageRadius; dy++){
+              for(let dx = -coverageRadius; dx <= coverageRadius; dx++){
+                const nx = stop.x + dx;
+                const ny = stop.y + dy;
+                if(nx < 0 || ny < 0 || nx >= GRID || ny >= GRID) continue;
+                const dist = Math.abs(dx) + Math.abs(dy);
+                if(dist > coverageRadius) continue;
+                const weight = Math.exp(-0.6 * dist);
+                const growth = intensityBase * weight * 0.22;
+                next[ny][nx] = Math.min(1, next[ny][nx] + growth);
+              }
+            }
+          });
+        });
+        return next;
+      });
+    }, [totalMinutes, enrichedRoutes]);
+
     // Build actions
     function handleCellClick(event,x,y){
       if(!activeRoute) return;
-      if(running){ banners.show({ target:'map', type:'info', text:'Pause to edit route — click Pause to add stops.'}); return; }
+      if(running){ banners.show({ target:'map', type:'info', text:'Pause the sim to place stops — the city will wait for you!'}); return; }
       if(event.shiftKey){
         updateActiveRoute(route => {
           if(!route.stops.some(p => p.x === x && p.y === y)) return route;
@@ -496,7 +575,7 @@
       if(!autoStarted && !running && stops.length>=3){
         setAutoStarted(true);
         setRunning(true);
-        banners.show({ target:'map', type:'success', text:'🚌 Service started — simulation running.'});
+        banners.show({ target:'map', type:'success', text:'🚌 Service rolling — riders are hopping aboard.'});
       }
     }, [stops.length, autoStarted, running]);
 
@@ -509,7 +588,7 @@
         const next = meets ? prev + 1 : 0;
         if(meets && next >= MODE_SHARE_STREAK_DAYS && !graduated){
           setGraduated(true);
-          banners.show({ type:'celebrate', text:`🎓 You graduated Tutorial City!`});
+          banners.show({ type:'celebrate', text:`🎓 You graduated Tutorial City — the neighbors are cheering!`});
         }
         return next;
       });
@@ -610,9 +689,25 @@
 
     // Milestones / advisories
     const lastMilestoneRef = useRef(0);
-    useEffect(()=>{ [1,2,3,5].forEach(m=>{ if(modeShare>=m && lastMilestoneRef.current<m){ lastMilestoneRef.current=m; banners.show({ type:m===5?'celebrate':'success', text:`Ridership milestone: ${m}%`} ); } }); }, [modeShare]);
-    useEffect(()=>{ if(cash < 250000) banners.show({ type:'warn', text:'Agency funds are low.'}); }, [cash]);
-    useEffect(()=>{ if(loadFactor>0.9) banners.show({ type:'info', text:'Buses are overcrowded — add service.'}); }, [loadFactor]);
+    useEffect(()=>{ [1,2,3,5].forEach(m=>{ if(modeShare>=m && lastMilestoneRef.current<m){ lastMilestoneRef.current=m; banners.show({ type:m===5?'celebrate':'success', text:`Transit share just reached ${m}% — great work keeping the city moving!`} ); } }); }, [modeShare]);
+    useEffect(()=>{ if(cash < 250000) banners.show({ type:'warn', text:'Friendly nudge: cash reserves are getting thin.'}); }, [cash]);
+    useEffect(()=>{ if(loadFactor>0.9) banners.show({ type:'info', text:'Buses are cozy-full — consider adding a bit more service.'}); }, [loadFactor]);
+    useEffect(() => {
+      const thresholds = [1000, 5000, 10000, 20000];
+      const riders = Number.isFinite(networkEstimatedRidersPerDay) ? networkEstimatedRidersPerDay : 0;
+      thresholds.forEach((threshold) => {
+        if(riders >= threshold && ridershipMilestoneRef.current < threshold){
+          ridershipMilestoneRef.current = threshold;
+          if(threshold >= 10000){
+            banners.show({ type:'celebrate', text:`🌆 Citizens are loving your service! ${threshold.toLocaleString()} riders hop on each day.`});
+          } else if(threshold >= 5000){
+            banners.show({ type:'success', text:`🌟 Ridership is soaring past ${threshold.toLocaleString()} riders/day.`});
+          } else {
+            banners.show({ type:'success', text:`🎉 Nice route! You now serve ${threshold.toLocaleString()} riders each day.`});
+          }
+        }
+      });
+    }, [networkEstimatedRidersPerDay, banners]);
 
     // UI helpers
     const fmtMoney = v => v.toLocaleString(undefined,{style:'currency',currency:'USD', maximumFractionDigits:0});
@@ -636,6 +731,37 @@
     const activeThrottled = !!activeRouteSummary?.throttled;
     const driversHours = drivers * SHIFT_HOURS;
     const depotThroughputRounded = Math.floor(depotThroughput);
+    const busPosition = useMemo(() => {
+      if(!stops || stops.length < 2) return null;
+      const totalSegments = stops.length - 1;
+      const loopLength = totalSegments * 2;
+      if(loopLength <= 0) return null;
+      const raw = busAnim?.loopDistance ?? 0;
+      const normalized = ((raw % loopLength) + loopLength) % loopLength;
+      let forwardDistance = normalized;
+      let direction = 1;
+      if(forwardDistance > totalSegments){
+        direction = -1;
+        forwardDistance = loopLength - forwardDistance;
+      }
+      const segmentIndex = Math.min(totalSegments - 1, Math.floor(forwardDistance));
+      const startPoint = stops[segmentIndex];
+      const endPoint = stops[segmentIndex + 1];
+      if(!startPoint || !endPoint) return null;
+      const segmentFraction = forwardDistance - segmentIndex;
+      const progress = direction === 1 ? segmentFraction : 1 - segmentFraction;
+      const x = (startPoint.x + (endPoint.x - startPoint.x) * progress) * cellSize + mapOffset + cellSize/2;
+      const y = (startPoint.y + (endPoint.y - startPoint.y) * progress) * cellSize + mapOffset + cellSize/2;
+      const angle = Math.atan2(endPoint.y - startPoint.y, endPoint.x - startPoint.x);
+      return { x, y, angle };
+    }, [busAnim, stops, cellSize, mapOffset]);
+    const busVisible = running && stops.length >= 2;
+    const busUsageSlots = useMemo(() => {
+      const total = 10;
+      const ratio = fleet > 0 ? vehiclesInUse / fleet : 0;
+      const filled = Math.round(Math.min(total, Math.max(0, ratio * total)));
+      return Array.from({ length: total }, (_, idx) => idx < filled);
+    }, [vehiclesInUse, fleet]);
 
     const handleToggleRunning = () => {
       if(!running){
@@ -665,6 +791,7 @@
       setEffSpeed(VEHICLE_SPEED_BASE);
       setAutoSkipIdle(false);
       setSpeed(1);
+      setBusAnim({ loopDistance: 0 });
       setPopulation(START_POP);
       setModeShare(0);
       setStreakDays(0);
@@ -673,12 +800,15 @@
       setServiceEndHour(DEFAULT_SERVICE_END_HOUR);
       financeAccumulatorRef.current = { income:0, costs:0 };
       setLastDayFinance({ income:0, costs:0, net:0 });
+      setDensityLevels(createDensityGrid());
       const updatedSeed = typeof nextSeed === 'number' ? nextSeed : seed;
       setPoiMap(generatePOIs(updatedSeed, START_POP));
       if(typeof nextSeed === 'number'){
         setSeed(updatedSeed);
       }
       lastPoiSpawnDayRef.current = 0;
+      densityDayRef.current = 1;
+      ridershipMilestoneRef.current = 0;
     };
 
     const handleJumpToService = () => {
@@ -708,7 +838,7 @@
     const prevServiceRef = useRef(withinService);
     useEffect(()=>{
       if(withinService && prevServiceRef.current === false){
-        banners.show({ target:'map', type:'info', text:'Service window opened — riders now boarding.'});
+        banners.show({ target:'map', type:'info', text:'Service window open — neighbors are lining up for a cozy ride.'});
       }
       prevServiceRef.current = withinService;
     }, [withinService, banners]);
@@ -717,9 +847,9 @@
   // Render
   return (
     <React.Fragment>
-      <div className="relative min-h-screen w-full bg-slate-50 text-slate-900">
+      <div className="relative min-h-screen w-full bg-gradient-to-b from-sky-50 via-emerald-50/40 to-white text-slate-900">
           {banners.hudView}
-          <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/90 backdrop-blur">
+          <header className="sticky top-0 z-40 border-b border-emerald-100/60 bg-white/80 backdrop-blur">
             <div className="mx-auto flex max-w-screen-2xl flex-wrap items-center justify-between gap-4 px-6 py-3">
               <div className="flex flex-wrap items-center gap-3 text-sm text-slate-700">
                 <span className="text-sm font-semibold text-slate-900">
@@ -727,7 +857,7 @@
                 </span>
                 <button
                   onClick={handleToggleRunning}
-                  className={`rounded-lg border px-3 py-1.5 text-sm font-semibold transition-colors ${running ? 'border-amber-400 bg-amber-100 text-amber-700' : 'border-sky-500 bg-sky-500 text-white hover:bg-sky-600'}`}
+                  className={`rounded-lg border px-3 py-1.5 text-sm font-semibold transition-colors ${running ? 'border-amber-400 bg-amber-100 text-amber-700' : 'border-emerald-500 bg-emerald-500 text-white hover:bg-emerald-600'}`}
                 >
                   {running ? '⏸ Pause' : '▶ Play'}
                 </button>
@@ -736,7 +866,7 @@
                     <button
                       key={opt}
                       onClick={()=> setSpeed(opt)}
-                      className={`rounded-lg border px-3 py-1.5 text-sm font-semibold transition-colors ${speed===opt ? 'border-sky-400 bg-sky-100 text-sky-700' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-100'}`}
+                      className={`rounded-lg border px-3 py-1.5 text-sm font-semibold transition-colors ${speed===opt ? 'border-emerald-300 bg-emerald-100 text-emerald-700' : 'border-emerald-100/70 bg-white/80 text-slate-700 hover:bg-emerald-50/40'}`}
                     >
                       {speedLabels[opt]}
                     </button>
@@ -748,25 +878,25 @@
                   onClick={handleJumpToService}
                   disabled={!canJumpToServiceStart}
                   title={canJumpToServiceStart ? 'Jump to service start' : 'Service hours disabled'}
-                  className={`rounded-lg border px-3 py-1.5 text-sm font-semibold transition-colors ${canJumpToServiceStart ? 'border-slate-200 bg-white text-slate-700 hover:bg-slate-100' : 'cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400'}`}
+                  className={`rounded-lg border px-3 py-1.5 text-sm font-semibold transition-colors ${canJumpToServiceStart ? 'border-emerald-100/70 bg-white/80 text-slate-700 hover:bg-emerald-50/40' : 'cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400'}`}
                 >
                   ⏭ Start
                 </button>
                 <button
                   onClick={()=> setSettingsOpen(true)}
-                  className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-100"
+                  className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 transition-colors hover:bg-emerald-50/40"
                 >
                   ⚙ Settings
                 </button>
                 <button
                   onClick={()=> resetGame()}
-                  className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-100"
+                  className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 transition-colors hover:bg-emerald-50/40"
                 >
                   Reset
                 </button>
                 <button
                   onClick={()=> resetGame(seed + 1)}
-                  className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-100"
+                  className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 transition-colors hover:bg-emerald-50/40"
                 >
                   New Map
                 </button>
@@ -777,32 +907,41 @@
 
           <main className="mx-auto max-w-screen-2xl px-6 py-6">
             <div className="flex flex-col items-center text-center">
-              <h1 className="text-2xl font-semibold tracking-tight">Transit Simulator</h1>
+              <h1 className="text-2xl font-semibold tracking-tight text-emerald-800">Transit Simulator</h1>
               <p className="text-sm text-slate-600">Tutorial City · Population {population.toLocaleString()} · Goal: {MODE_SHARE_TARGET}% for {MODE_SHARE_STREAK_DAYS} days</p>
               <p className="mt-1 text-sm text-slate-700">
-                Network Grade: <span className="font-semibold text-slate-900">{networkGrade ?? '—'}</span>
+                Network grade: <span className="font-semibold text-emerald-700">{networkGrade ?? '—'}</span> · Citizens appreciate every comfy ride.
               </p>
             </div>
 
             <div className="grid h-[calc(100vh-8rem)] grid-cols-1 items-start gap-4 pt-6 pb-10 sm:px-2 lg:grid-cols-[320px_minmax(0,1fr)_340px]">
-              <aside className="order-2 flex h-full flex-col gap-4 overflow-y-auto rounded-2xl border border-slate-200 bg-white/90 p-4 shadow-sm lg:order-1">
+              <aside className="order-2 flex h-full flex-col gap-4 overflow-y-auto rounded-2xl border border-emerald-100/60 bg-white/85 p-4 shadow-sm lg:order-1">
                 <div>
                   <div className="text-xs uppercase text-slate-500">Cash</div>
                   <div className={`text-3xl font-semibold ${cash<0?'text-rose-600':'text-emerald-600'}`}>{fmtMoney(cash)}</div>
                 </div>
                 <div className="space-y-3 text-xs text-slate-600">
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <div className="rounded-xl border border-emerald-100/70 bg-emerald-50/60 p-3">
                     <div className="text-sm font-semibold text-slate-900">Operations</div>
                     <div className="mt-2 space-y-1">
                       <div className="flex items-center justify-between"><span>Fleet owned</span><span className="font-semibold text-slate-900">{fleet}</span></div>
-                      <div className="flex items-center justify-between"><span>Vehicles in use</span><span className="font-semibold text-slate-900">{vehiclesInUse}</span></div>
+                      <div>
+                        <div className="flex items-center justify-between"><span>Fleet in motion</span><span className="font-semibold text-slate-900">{vehiclesInUse}</span></div>
+                        <div className="mt-1 flex items-center gap-0.5" aria-hidden>
+                          {busUsageSlots.map((filled, idx) => (
+                            <span key={idx} className={`text-[13px] leading-none ${filled ? 'text-emerald-600' : 'text-emerald-200/80'}`}>
+                              🚌
+                            </span>
+                          ))}
+                        </div>
+                      </div>
                       <div className="flex items-center justify-between"><span>Spare buses</span><span className="font-semibold text-slate-900">{spareBuses}</span></div>
                       <div className="flex items-center justify-between"><span>Depot capacity</span><span className="font-semibold text-slate-900">{depotCap}</span></div>
                       <div className="flex items-center justify-between"><span>Drivers</span><span className="font-semibold text-slate-900">{drivers} ({driversHours} drv-hrs)</span></div>
                     </div>
                     <div className="mt-2 text-xs text-slate-500">Service {serviceStartHour}:00–{serviceEndHour}:00 ({serviceHoursToday} hrs)</div>
                   </div>
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <div className="rounded-xl border border-emerald-100/70 bg-emerald-50/60 p-3">
                     <div className="text-sm font-semibold text-slate-900">Performance</div>
                     <div className="mt-2 space-y-1">
                       <div className="flex items-center justify-between"><span>Mode share</span><span className="font-semibold text-slate-900">{modeShare.toFixed(1)}%</span></div>
@@ -813,12 +952,12 @@
                       <div className="flex items-center justify-between"><span>Load factor</span><span className="font-semibold text-slate-900">{(loadFactor*100).toFixed(0)}%</span></div>
                     </div>
                   </div>
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <div className="rounded-xl border border-emerald-100/70 bg-emerald-50/60 p-3">
                     <div className="flex items-center justify-between"><span>Network target veh/hr</span><span className="font-semibold text-slate-900">{networkTargetVPH.toFixed(1)}</span></div>
                     <div className="mt-1 flex items-center justify-between"><span>Network actual veh/hr</span><span className="font-semibold text-slate-900">{networkActualVPH.toFixed(1)}</span></div>
                     <div className="mt-2 flex items-center justify-between"><span>Active round trip</span><span className="font-semibold text-slate-900">{activeRoundTripMinutes ? `${activeRoundTripMinutes} min` : '—'}</span></div>
                   </div>
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <div className="rounded-xl border border-emerald-100/70 bg-emerald-50/60 p-3">
                     <div className="flex items-center justify-between"><span>Estimated riders/day</span><span className="font-semibold text-slate-900">{Number.isFinite(networkRidersPerDay) ? Math.round(networkRidersPerDay).toLocaleString() : '—'}</span></div>
                     <div className="mt-2 flex flex-col gap-1">
                       <span className="font-medium text-slate-600">Daily money:</span>
@@ -826,22 +965,22 @@
                     </div>
                     <div className="mt-3">
                       <div className="flex justify-between text-xs"><span>Transit mode share</span><span>{modeShare.toFixed(2)}% / {MODE_SHARE_TARGET}%</span></div>
-                      <div className="mt-1 h-2 overflow-hidden rounded-full bg-slate-200">
-                        <div className="h-full bg-sky-500" style={{ width: `${Math.min(100, (modeShare/MODE_SHARE_TARGET)*100)}%` }} />
+                      <div className="mt-1 h-2 overflow-hidden rounded-full bg-emerald-100/70">
+                        <div className="h-full bg-emerald-400" style={{ width: `${Math.min(100, (modeShare/MODE_SHARE_TARGET)*100)}%` }} />
                       </div>
                     </div>
                   </div>
                 </div>
               </aside>
-              <section className="order-1 flex h-full min-h-[420px] flex-col rounded-2xl border border-slate-200 bg-white/90 p-4 shadow-sm lg:order-2">
+              <section className="order-1 flex h-full min-h-[420px] flex-col rounded-2xl border border-emerald-100/60 bg-white/85 p-4 shadow-sm lg:order-2">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
                     <span className="inline-flex h-3 w-3 rounded-full" style={{ backgroundColor: activeRouteSummary?.color || '#0ea5e9' }} />
                     <span>{activeRoute?.name || 'Route'}</span>
                   </div>
                   <div className="flex items-center gap-3 text-xs text-slate-600">
-                    <span>{activeRouteDailyRiders !== null ? `${Math.round(activeRouteDailyRiders).toLocaleString()} riders/day` : 'Add stops to estimate'}</span>
-                    <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-slate-100 text-[11px] font-bold text-slate-700">{activeRouteSummary?.grade ?? '–'}</span>
+                    <span>{activeRouteDailyRiders !== null ? `${Math.round(activeRouteDailyRiders).toLocaleString()} riders/day` : 'Add stops to peek at riders'}</span>
+                    <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-emerald-100/80 text-[11px] font-bold text-emerald-700">{activeRouteSummary?.grade ?? '–'}</span>
                   </div>
                 </div>
                 <div className="mt-2 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-600">
@@ -851,7 +990,7 @@
                   <span>Round trip {activeRoundTripMinutes ? `${activeRoundTripMinutes} min` : '—'}</span>
                 </div>
                 <div className="mt-3 flex-1">
-                  <div ref={mapContainerRef} className="relative flex h-full w-full overflow-hidden rounded-2xl bg-slate-100">
+                  <div ref={mapContainerRef} className="relative flex h-full w-full overflow-hidden rounded-2xl bg-gradient-to-br from-emerald-50/70 via-sky-50 to-white">
                     <MapToast toasts={banners.mapQueue} onDismiss={banners.dismiss} />
                     <div className="grid h-full w-full place-items-center">
                       <div className="relative" style={{ width: displaySize, height: displaySize }}>
@@ -866,18 +1005,25 @@
                                 const popVal = isRealCell ? land.pop[gridY][gridX] : 0;
                                 const jobsVal = isRealCell ? land.jobs[gridY][gridX] : 0;
                                 const poi = isRealCell ? poiMap.get(key) : null;
-                                const bg = isRealCell
-                                  ? (popVal===0? '#EFF6FF' : popVal===1? '#DBEAFE' : popVal===2? '#BFDBFE' : '#93C5FD')
-                                  : '#F8FAFC';
+                                const densityLevel = isRealCell ? (densityLevels[gridY]?.[gridX] ?? 0) : 0;
+                                const baseIdx = Math.min(TILE_BASE_COLORS.length - 1, Math.max(0, popVal));
+                                const baseColor = TILE_BASE_COLORS[baseIdx] || TILE_BASE_COLORS[0];
+                                const tinted = isRealCell ? mixHexColor(baseColor, TILE_DENSITY_TINT, densityLevel * 0.8) : '#f6faf9';
+                                const bg = isRealCell ? tinted : '#f6faf9';
                                 const outline = isRealCell
-                                  ? (jobsVal>0 ? '1px solid rgba(234,179,8,0.25)' : '1px solid rgba(15,23,42,0.06)')
+                                  ? (jobsVal>0 ? `1px solid ${JOB_OUTLINE_COLOR}` : `1px solid ${IDLE_OUTLINE_COLOR}`)
                                   : '1px solid rgba(148,163,184,0.25)';
+                                const glow = densityLevel > 0.05 ? `inset 0 0 0 1.5px rgba(58,174,161,${Math.min(0.35, densityLevel)})` : 'none';
+                                const sparkleOpacity = densityLevel > 0.25 ? Math.min(0.45, densityLevel) : 0;
                                 return (
                                   <div
                                     key={`${x}-${y}`}
                                     onClick={isRealCell ? (e)=> handleCellClick(e, gridX, gridY) : undefined}
-                                    style={{ width: cellSize, height: cellSize, backgroundColor:bg, outline, cursor: isRealCell ? 'crosshair' : 'default', position:'relative' }}
+                                    style={{ width: cellSize, height: cellSize, backgroundColor:bg, outline, boxShadow: glow, cursor: isRealCell ? 'crosshair' : 'default', position:'relative', overflow:'hidden', borderRadius:4 }}
                                   >
+                                    {sparkleOpacity>0 && (
+                                      <div className="tile-sparkle pointer-events-none absolute inset-1 rounded-md bg-emerald-200/40" style={{ opacity: sparkleOpacity }} />
+                                    )}
                                     {poi && <div style={{position:'absolute', inset:'0', display:'grid', placeItems:'center', fontSize:'12px'}}>{poiIcon(poi)}</div>}
                                   </div>
                                 );
@@ -908,6 +1054,16 @@
                             )
                           ))}
                         </svg>
+                        {busVisible && busPosition && (
+                          <div
+                            className="pointer-events-none absolute z-30"
+                            style={{ left: busPosition.x, top: busPosition.y, transform: `translate(-50%, -50%) rotate(${busPosition.angle}rad)` }}
+                          >
+                            <span className="bus-emoji inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/85 text-lg shadow-lg ring-1 ring-emerald-200/80">
+                              🚌
+                            </span>
+                          </div>
+                        )}
                         {routeSummaries.map(summary => (
                           summary.stops.map((point, idx) => (
                             <div
@@ -926,13 +1082,13 @@
                     </div>
                   </div>
                 </div>
-                <p className="mt-2 text-center text-xs text-slate-500">Click to add · Shift-click to remove · Edit when paused</p>
+                <p className="mt-2 text-center text-xs text-slate-500">Click to add stops · Shift removes · Pause to tweak at your own pace</p>
               </section>
-              <aside className="order-3 flex h-full flex-col gap-4 overflow-y-auto rounded-2xl border border-slate-200 bg-white/90 p-4 shadow-sm lg:order-3">
+              <aside className="order-3 flex h-full flex-col gap-4 overflow-y-auto rounded-2xl border border-emerald-100/60 bg-white/85 p-4 shadow-sm lg:order-3">
                 <div>
                   <div className="flex items-center justify-between">
                     <div className="text-sm font-medium text-slate-900">Routes</div>
-                    <button onClick={handleAddRoute} className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs font-medium hover:bg-slate-100">New Route</button>
+                    <button onClick={handleAddRoute} className="rounded-lg border border-emerald-200 bg-white/80 px-2 py-1 text-xs font-medium hover:bg-emerald-50/40">New Route</button>
                   </div>
                   <div className="mt-3 space-y-2">
                     {routeSummaries.map(summary => {
@@ -942,14 +1098,14 @@
                         <button
                           key={summary.id}
                           onClick={()=> { destHeavyShownRef.current = false; setActiveRouteId(summary.id); }}
-                          className={`w-full rounded-xl border px-3 py-2 text-left text-sm ${isActive ? 'border-sky-300 bg-sky-100 text-slate-900' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`}
+                          className={`w-full rounded-xl border px-3 py-2 text-left text-sm ${isActive ? 'border-emerald-300 bg-emerald-100 text-emerald-900' : 'border-emerald-100/60 bg-white/80 text-slate-700 hover:bg-emerald-50/40'}`}
                         >
                           <div className="flex items-center justify-between">
                             <span className="flex items-center gap-2">
                               <span className="inline-flex h-2.5 w-2.5 rounded-full" style={{ backgroundColor: summary.color }} />
                               <span className="font-medium">{summary.name}</span>
                             </span>
-                            <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-slate-100 text-[11px] font-bold text-slate-700">{summary.grade ?? '–'}</span>
+                            <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-emerald-100/80 text-[11px] font-bold text-emerald-700">{summary.grade ?? '–'}</span>
                           </div>
                           <div className="mt-1 flex items-center justify-between text-xs text-slate-600">
                             <span>{summary.ridersPerDay !== null ? `${summary.ridersPerDay.toLocaleString()} riders/day` : 'No service yet'}</span>
@@ -961,12 +1117,12 @@
                       );
                     })}
                     {!routeSummaries.length && (
-                      <div className="rounded-xl border border-dashed border-slate-300 bg-white px-3 py-4 text-center text-xs text-slate-500">Create a route to begin service.</div>
+                      <div className="rounded-xl border border-dashed border-emerald-200 bg-white/80 px-3 py-4 text-center text-xs text-slate-500">Create a route to begin service.</div>
                     )}
                   </div>
                 </div>
 
-                <div className="rounded-2xl border border-slate-200 bg-white p-4 text-xs text-slate-700 shadow-sm">
+                <div className="rounded-2xl border border-emerald-100/60 bg-white/80 p-4 text-xs text-slate-700 shadow-sm">
                   <div className="text-sm font-medium text-slate-900">Selected Route</div>
                   <div className="mt-2 space-y-2">
                     <div className="flex items-center justify-between">
@@ -995,7 +1151,7 @@
                   </div>
                 </div>
 
-                <div className="rounded-2xl border border-slate-200 bg-white p-4 text-xs text-slate-700 shadow-sm">
+                <div className="rounded-2xl border border-emerald-100/60 bg-white/80 p-4 text-xs text-slate-700 shadow-sm">
                   <div className="text-sm font-medium text-slate-900">Fare & Policy</div>
                   <div className="mt-3">
                     <NumberStepper
@@ -1009,20 +1165,20 @@
                   </div>
                 </div>
 
-                <div className="rounded-2xl border border-slate-200 bg-white p-4 text-xs text-slate-700 shadow-sm">
+                <div className="rounded-2xl border border-emerald-100/60 bg-white/80 p-4 text-xs text-slate-700 shadow-sm">
                   <div className="text-sm font-medium text-slate-900">Service Hours</div>
                   <div className="mt-3 grid grid-cols-2 gap-3">
-                    <label>Start: <input type="number" min="0" max="23" value={serviceStartHour} onChange={e=> setServiceStartHour(clamp(parseInt(e.target.value)||0,0,23))} className="ml-1 w-16 rounded border border-slate-300 px-1" />:00</label>
-                    <label>End: <input type="number" min="1" max="24" value={serviceEndHour} onChange={e=> setServiceEndHour(clamp(parseInt(e.target.value)||0,1,24))} className="ml-1 w-16 rounded border border-slate-300 px-1" />:00</label>
+                    <label>Start: <input type="number" min="0" max="23" value={serviceStartHour} onChange={e=> setServiceStartHour(clamp(parseInt(e.target.value)||0,0,23))} className="ml-1 w-16 rounded border border-emerald-200 px-1" />:00</label>
+                    <label>End: <input type="number" min="1" max="24" value={serviceEndHour} onChange={e=> setServiceEndHour(clamp(parseInt(e.target.value)||0,1,24))} className="ml-1 w-16 rounded border border-emerald-200 px-1" />:00</label>
                   </div>
                   <div className="mt-1 text-xs text-slate-500">Current span: {Math.max(0, serviceEndHour - serviceStartHour)} hours/day</div>
                 </div>
 
-                <div className="rounded-2xl border border-slate-200 bg-white p-4 text-xs text-slate-700 shadow-sm">
+                <div className="rounded-2xl border border-emerald-100/60 bg-white/80 p-4 text-xs text-slate-700 shadow-sm">
                   <div className="mb-2 text-sm font-medium text-slate-900">Fleet & Depot</div>
                   <div className="space-y-1 text-sm text-slate-700">
                     <div>Buses owned: <span className="font-semibold text-slate-900">{fleet}</span></div>
-                    <div>Vehicles in use: <span className="font-semibold text-slate-900">{vehiclesInUse}</span> / Fleet {fleet} (Spare {spareBuses})</div>
+                    <div>Fleet in motion: <span className="font-semibold text-slate-900">{vehiclesInUse}</span> / {fleet} buses (Spare {spareBuses})</div>
                     <div>Depot capacity: <span className="font-semibold text-slate-900">{depotCap}</span></div>
                     <div>Max throughput: <span className="font-semibold text-slate-900">{depotThroughputRounded}</span> veh/hr</div>
                   </div>
@@ -1032,49 +1188,47 @@
                     </div>
                   )}
                   <div className="mt-3 flex flex-wrap gap-2">
-                    <button onClick={()=> buyBuses(1)} className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs hover:bg-slate-100">Buy 1 ({FUELS[fuel].busCost.toLocaleString()})</button>
-                    <button onClick={()=> buyBuses(5)} className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs hover:bg-slate-100">Buy 5 (−5%)</button>
-                    <button onClick={()=> buyBuses(10)} className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs hover:bg-slate-100">Buy 10 (−10%)</button>
-                    <button onClick={expandDepot} className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs hover:bg-slate-100">Expand Depot +{DEPOT_EXPANSION_STEP} ({DEPOT_EXPANSION_COST.toLocaleString()})</button>
+                    <button onClick={()=> buyBuses(1)} className="rounded-lg border border-emerald-200 bg-white/80 px-2 py-1 text-xs hover:bg-emerald-50/40">Buy 1 ({FUELS[fuel].busCost.toLocaleString()})</button>
+                    <button onClick={()=> buyBuses(5)} className="rounded-lg border border-emerald-200 bg-white/80 px-2 py-1 text-xs hover:bg-emerald-50/40">Buy 5 (−5%)</button>
+                    <button onClick={()=> buyBuses(10)} className="rounded-lg border border-emerald-200 bg-white/80 px-2 py-1 text-xs hover:bg-emerald-50/40">Buy 10 (−10%)</button>
+                    <button onClick={expandDepot} className="rounded-lg border border-emerald-200 bg-white/80 px-2 py-1 text-xs hover:bg-emerald-50/40">Expand Depot +{DEPOT_EXPANSION_STEP} ({DEPOT_EXPANSION_COST.toLocaleString()})</button>
                   </div>
                 </div>
 
-                <div className="rounded-2xl border border-slate-200 bg-white p-4 text-xs text-slate-700 shadow-sm">
+                <div className="rounded-2xl border border-emerald-100/60 bg-white/80 p-4 text-xs text-slate-700 shadow-sm">
                   <div className="mb-2 text-sm font-medium text-slate-900">Fuel & Drivers</div>
                   <div className="flex flex-wrap gap-2">
                     {Object.keys(FUELS).map(k=>(
-                      <button key={k} onClick={()=> setFuel(k)} className={`rounded-lg border px-2 py-1 text-xs ${fuel===k?'border-sky-300 bg-sky-100':'border-slate-300 bg-white hover:bg-slate-100'}`}>{k}</button>
+                      <button key={k} onClick={()=> setFuel(k)} className={`rounded-lg border px-2 py-1 text-xs ${fuel===k?'border-emerald-300 bg-emerald-100':'border-emerald-200 bg-white/80 hover:bg-emerald-50/40'}`}>{k}</button>
                     ))}
                   </div>
                   <div className="mt-2 text-sm">$ / km: <span className="font-semibold text-slate-900">{FUELS[fuel].costPerKm.toFixed(2)}</span></div>
                   <div className="mt-1 text-sm">
                     Drivers: <span className="font-semibold text-slate-900">{drivers}</span>
-                    <button onClick={()=> hireDrivers(+10)} className="ml-2 rounded border border-slate-300 bg-white px-2 py-0.5 text-xs hover:bg-slate-100">+10</button>
-                    <button onClick={()=> hireDrivers(-10)} className="ml-1 rounded border border-slate-300 bg-white px-2 py-0.5 text-xs hover:bg-slate-100">−10</button>
+                    <button onClick={()=> hireDrivers(+10)} className="ml-2 rounded border border-emerald-200 bg-white/80 px-2 py-0.5 text-xs hover:bg-emerald-50/40">+10</button>
+                    <button onClick={()=> hireDrivers(-10)} className="ml-1 rounded border border-emerald-200 bg-white/80 px-2 py-0.5 text-xs hover:bg-emerald-50/40">−10</button>
                   </div>
                 </div>
               </aside>
             </div>
-          </div>
-
           </main>
 
           {settingsOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4">
-            <div className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-6 shadow-xl">
+            <div className="w-full max-w-sm rounded-2xl border border-emerald-100/60 bg-white/85 p-6 shadow-xl">
               <div className="flex items-center justify-between">
                 <h2 className="text-lg font-semibold text-slate-900">Settings</h2>
-                <button onClick={()=> setSettingsOpen(false)} className="rounded-md border border-slate-200 bg-white px-2 py-1 text-sm text-slate-600 hover:bg-slate-100">✕</button>
+                <button onClick={()=> setSettingsOpen(false)} className="rounded-md border border-emerald-100/60 bg-white/80 px-2 py-1 text-sm text-slate-600 hover:bg-emerald-50/40">✕</button>
               </div>
               <div className="mt-4 space-y-5 text-sm text-slate-700">
                 <label className="flex items-center justify-between gap-3">
                   <span className="font-medium text-slate-800">Auto-skip idle minutes</span>
-                  <input type="checkbox" checked={autoSkipIdle} onChange={e=> setAutoSkipIdle(e.target.checked)} className="h-4 w-4 rounded border border-slate-300" />
+                  <input type="checkbox" checked={autoSkipIdle} onChange={e=> setAutoSkipIdle(e.target.checked)} className="h-4 w-4 rounded border border-emerald-200" />
                 </label>
               </div>
 
               <div className="mt-6 flex justify-end">
-                <button onClick={()=> setSettingsOpen(false)} className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium hover:bg-slate-100">Close</button>
+                <button onClick={()=> setSettingsOpen(false)} className="rounded-lg border border-emerald-200 bg-white/80 px-3 py-1.5 text-sm font-medium hover:bg-emerald-50/40">Close</button>
               </div>
             </div>
           </div>
