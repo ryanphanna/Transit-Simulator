@@ -203,7 +203,7 @@ function App(){
       }
       return next;
     });
-    const years = Math.floor(nextTotalMinutes/525_600);
+    const years = Math.floor(nextTotalMinutes/525600);
     setPopulation(START_POP + years*POP_GROWTH_PER_YEAR);
   }, [serviceHoursToday, population, graduated, banners]);
 
@@ -302,7 +302,7 @@ function App(){
   // Milestones / advisories
   const lastMilestoneRef = useRef(0);
   useEffect(()=>{ [1,2,3,5].forEach(m=>{ if(modeShare>=m && lastMilestoneRef.current<m){ lastMilestoneRef.current=m; banners.show({ type:m===5?'celebrate':'success', text:`Ridership milestone: ${m}%`} ); } }); }, [modeShare]);
-  useEffect(()=>{ if(cash < 250_000) banners.show({ type:'warn', text:'Agency funds are low.'}); }, [cash]);
+  useEffect(()=>{ if(cash < 250000) banners.show({ type:'warn', text:'Agency funds are low.'}); }, [cash]);
   useEffect(()=>{ if(loadFactor>0.9) banners.show({ type:'info', text:'Buses are overcrowded — add service.'}); }, [loadFactor]);
 
   // UI helpers
