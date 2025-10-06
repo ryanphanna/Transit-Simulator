@@ -1113,11 +1113,11 @@
                 </aside>
                 <section
                   id="center-col"
-                  className="order-1 h-full overflow-hidden lg:order-2"
+                  className="order-2 h-full min-h-0 overflow-hidden rounded-2xl border border-emerald-100/60 bg-white/85 shadow-sm lg:order-2"
                   aria-label="Active route map and details"
                 >
                   <div ref={centerColRef} className="h-full">
-                    <div className="flex h-full flex-col rounded-2xl border border-emerald-100/60 bg-white/85 shadow-sm">
+                    <div className="flex h-full flex-col">
                       <div className="shrink-0 border-b border-emerald-100/70 bg-white/70 px-4 py-3">
                         <div className="flex flex-col gap-3">
                           <div className="text-center">
