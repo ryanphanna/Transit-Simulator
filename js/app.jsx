@@ -23,7 +23,7 @@
   } = TS;
   const { useBanners, InfoTip, NumberStepper, MapToast } = TS;
 
-  const { useEffect, useMemo, useState, useRef, useCallback } = React;
+  const { useEffect, useMemo, useState, useRef, useCallback, useLayoutEffect } = React;
 
   const ROUTE_COLORS = (TS.ROUTE_COLORS && TS.ROUTE_COLORS.length)
     ? TS.ROUTE_COLORS
@@ -125,85 +125,72 @@
     const displaySize = canvasSize + visualPadding * 2 * cellSize;
     const mapOffset = visualPadding * cellSize;
     const paddedGrid = GRID + visualPadding * 2;
-    const mapCardRef = useRef(null);
-    const mapHeaderRef = useRef(null);
-    const mapFooterRef = useRef(null);
-    const [mapSquarePx, setMapSquarePx] = useState(480);
     const topBarRef = useRef(null);
-    const [topBarHeight, setTopBarHeight] = useState(64);
+    const centerColRef = useRef(null);
+    const mapAreaRef = useRef(null);
+    const [canvasTick, setCanvasTick] = useState(0);
     const [showHeatmap, setShowHeatmap] = useState(false);
     const [simpleHud, setSimpleHud] = useState(true);
     const [settingsOpen,setSettingsOpen]=useState(false);
-    const recomputeMapSize = useCallback(() => {
-      const card = mapCardRef.current;
-      if (!card) return;
-      const rect = card.getBoundingClientRect();
-      const top = Number.isFinite(rect.top) ? rect.top : 0;
-      const availCardH = Math.max(200, Math.floor(window.innerHeight - top - 16));
-      card.style.height = `${availCardH}px`;
-
-      const headerH = mapHeaderRef.current?.offsetHeight || 0;
-      const footerH = mapFooterRef.current?.offsetHeight || 0;
-      const style = window.getComputedStyle(card);
-      const parsePx = (value) => {
-        const num = parseFloat(value);
-        return Number.isFinite(num) ? num : 0;
-      };
-      const padY = parsePx(style.paddingTop) + parsePx(style.paddingBottom);
-      const padX = parsePx(style.paddingLeft) + parsePx(style.paddingRight);
-
-      const innerH = Math.max(100, availCardH - headerH - footerH - padY);
-      const innerW = Math.max(100, card.clientWidth - padX);
-      if (!Number.isFinite(innerH) || !Number.isFinite(innerW)) return;
-
-      const desiredSquare = Math.floor(Math.min(innerH, innerW));
-      if (desiredSquare <= 0) return;
-
-      const nextCell = Math.max(14, Math.floor(desiredSquare / GRID));
+    const resizeMap = useCallback(() => {
+      const area = mapAreaRef.current;
+      if (!area) return;
+      const pad = 16;
+      const availW = Math.max(0, area.clientWidth - pad * 2);
+      const availH = Math.max(0, area.clientHeight - pad * 2);
+      const desired = Math.floor(Math.min(availW, availH));
+      if (!Number.isFinite(desired) || desired <= 0) return;
+      const nextCell = Math.max(14, Math.floor(desired / GRID));
       const nextCanvas = nextCell * GRID;
-
       setVisualPadding(prev => (prev === 0 ? prev : 0));
       setCellSize(prev => (prev === nextCell ? prev : nextCell));
-      setMapSquarePx(prev => (prev === nextCanvas ? prev : nextCanvas));
-
       if (TS) {
         TS.CELL_SIZE = nextCell;
         TS.CANVAS_SIZE = nextCanvas;
       }
+      setCanvasTick(t => t + 1);
     }, [GRID]);
 
-    useEffect(() => {
-      recomputeMapSize();
-      let ro;
-      if (typeof ResizeObserver === 'function' && mapCardRef.current) {
-        ro = new ResizeObserver(() => recomputeMapSize());
-        ro.observe(mapCardRef.current);
+    useLayoutEffect(() => {
+      const topbarEl = topBarRef.current || document.getElementById('topbar');
+      function setVar() {
+        const h = topbarEl ? topbarEl.offsetHeight : 64;
+        document.documentElement.style.setProperty('--topbar-h', `${h}px`);
       }
-      const onResize = () => recomputeMapSize();
-      window.addEventListener('resize', onResize);
-      return () => {
-        if (ro) ro.disconnect();
-        window.removeEventListener('resize', onResize);
-      };
-    }, [recomputeMapSize]);
-
-    useEffect(() => {
-      const node = topBarRef.current;
-      if (!node) return;
-      const measure = () => {
-        const height = Math.round(node.getBoundingClientRect().height || 64);
-        setTopBarHeight(prev => (prev === height ? prev : height));
-      };
+      setVar();
       if (typeof ResizeObserver === 'function') {
-        const observer = new ResizeObserver(measure);
-        observer.observe(node);
-        measure();
-        return () => observer.disconnect();
+        const ro = new ResizeObserver(setVar);
+        if (topbarEl) {
+          ro.observe(topbarEl);
+        }
+        return () => {
+          ro.disconnect();
+        };
       }
-      measure();
-      window.addEventListener('resize', measure);
-      return () => window.removeEventListener('resize', measure);
+      return undefined;
     }, []);
+
+    useLayoutEffect(() => {
+      resizeMap();
+      if (typeof ResizeObserver !== 'function') {
+        window.addEventListener('resize', resizeMap);
+        return () => {
+          window.removeEventListener('resize', resizeMap);
+        };
+      }
+      const ro = new ResizeObserver(resizeMap);
+      if (centerColRef.current) {
+        ro.observe(centerColRef.current);
+      }
+      if (mapAreaRef.current) {
+        ro.observe(mapAreaRef.current);
+      }
+      window.addEventListener('resize', resizeMap);
+      return () => {
+        ro.disconnect();
+        window.removeEventListener('resize', resizeMap);
+      };
+    }, [resizeMap]);
 
     useEffect(() => {
       TS.CELL_SIZE = cellSize;
@@ -456,8 +443,8 @@
     }, [routes, enrichedRoutes, routeEstimateMap, polylineFor, routeScoreAndGrade, ROUTE_COLORS]);
 
     useEffect(() => {
-      recomputeMapSize();
-    }, [recomputeMapSize, routeSummaries.length, topBarHeight]);
+      resizeMap();
+    }, [resizeMap, routeSummaries.length]);
 
     const activeRouteSummary = useMemo(() => routeSummaries.find(r => r.id === activeRouteId) || null, [routeSummaries, activeRouteId]);
     const gradeOrder = ['F','D','C','B','A'];
@@ -1022,7 +1009,7 @@
     <React.Fragment>
       <div className="relative min-h-screen w-full bg-gradient-to-b from-sky-50 via-emerald-50/40 to-white text-slate-900">
           {banners.hudView}
-          <header ref={topBarRef} className="sticky top-0 z-40 border-b border-emerald-100/60 bg-white/80 backdrop-blur">
+          <header id="topbar" ref={topBarRef} className="sticky top-0 z-40 border-b border-emerald-100/60 bg-white/80 backdrop-blur">
             <div className="mx-auto flex w-full max-w-screen-2xl flex-wrap items-center justify-between gap-4 px-6 py-3 text-sm text-slate-700 md:px-10 lg:px-14">
               <div className="flex flex-wrap items-center gap-2 sm:gap-3">
                 <span className="font-semibold text-slate-900">
@@ -1080,222 +1067,228 @@
             </div>
           </header>
 
-          <main
-            className="mx-auto w-full max-w-screen-2xl px-6 pb-6 pt-6 md:px-10 lg:px-14"
-            style={{ minHeight: `calc(100vh - ${topBarHeight}px)` }}
-          >
-            <div className="flex min-h-full flex-col">
-              <div className="flex flex-col items-center text-center">
-                <h1 className="text-2xl font-semibold tracking-tight text-emerald-800">Transit Simulator</h1>
-                <p className="text-sm text-slate-600">Tutorial City · Population {population.toLocaleString()} · Goal: {MODE_SHARE_TARGET}% for {MODE_SHARE_STREAK_DAYS} days</p>
-                <p className="mt-1 text-sm text-slate-700">
-                  Network grade: <span className="font-semibold text-emerald-700">{networkGrade ?? '—'}</span> · Citizens appreciate every comfy ride.
-                </p>
-              </div>
 
-              <div className="mt-6 flex-1 min-h-0 sm:px-2">
-                <div className="grid h-full min-h-0 grid-cols-1 items-stretch gap-6 lg:grid-cols-[360px_minmax(520px,1fr)_360px]">
-              <aside
-                className="order-2 flex min-h-0 flex-col rounded-2xl border border-emerald-100/60 bg-white/85 p-4 shadow-sm lg:order-1"
-                aria-label="Network overview panel"
-              >
-                <div className="flex items-center justify-between rounded-xl bg-white/70 px-3 py-2 text-xs font-semibold text-slate-600">
-                  <span>{simpleHud ? 'Simple view' : 'Detailed view'}</span>
-                  <div className="inline-flex overflow-hidden rounded-lg border border-emerald-100/80 bg-white/60 text-[11px] font-medium">
-                    <button
-                      type="button"
-                      onClick={() => setSimpleHud(true)}
-                      aria-pressed={simpleHud}
-                      className={`px-3 py-1 transition-colors ${simpleHud ? 'bg-emerald-100 text-emerald-700' : 'text-slate-500 hover:bg-emerald-50/40 hover:text-slate-700'}`}
-                    >
-                      Simple view
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setSimpleHud(false)}
-                      aria-pressed={!simpleHud}
-                      className={`px-3 py-1 transition-colors ${!simpleHud ? 'bg-emerald-100 text-emerald-700' : 'text-slate-500 hover:bg-emerald-50/40 hover:text-slate-700'}`}
-                    >
-                      Detailed view
-                    </button>
-                  </div>
-                </div>
-                <div className="mt-4">
-                  <div className="text-xs uppercase text-slate-500">Cash</div>
-                  <div className={`text-3xl font-semibold ${cash<0?'text-rose-600':'text-emerald-600'}`}>{fmtMoney(cash)}</div>
-                </div>
-                <div className="mt-4 flex-1 overflow-y-auto pr-1">
-                  {simpleHud ? simpleHudContent : detailedHudContent}
-                </div>
-              </aside>
-              <section
-                ref={mapCardRef}
-                className="order-1 flex min-h-0 flex-col overflow-hidden rounded-2xl border border-emerald-100/60 bg-white/85 shadow-sm lg:order-2"
-                aria-label="Active route map and details"
-              >
-                <div ref={mapHeaderRef} className="border-b border-emerald-100/70 bg-white/70 px-4 py-3">
-                  <div className="flex flex-col gap-3">
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                        <span className="inline-flex h-3 w-3 rounded-full" style={{ backgroundColor: activeRouteSummary?.color || '#0ea5e9' }} />
-                        <span>{activeRoute?.name || 'Route'}</span>
-                      </div>
-                      <div className="flex items-center gap-3 text-xs text-slate-600">
-                        <span>{activeRouteDailyRiders !== null ? `${Math.round(activeRouteDailyRiders).toLocaleString()} riders/day` : 'Add stops to peek at riders'}</span>
-                        <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-emerald-100/80 text-[11px] font-bold text-emerald-700">{activeRouteSummary?.grade ?? '–'}</span>
-                      </div>
-                    </div>
-                    <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-slate-600">
-                      <span className={`font-semibold ${activeThrottled ? 'text-amber-600' : 'text-slate-700'}`}>
-                        {activeActualVPH.toFixed(1)} / <span className={activeThrottled ? 'text-slate-400' : 'text-slate-500'}>{activeTargetVPH.toFixed(1)}</span> veh/hr
-                      </span>
-                      <span>Round trip {activeRoundTripMinutes ? `${activeRoundTripMinutes} min` : '—'}</span>
+
+
+
+          <main
+            id="app-viewport"
+            className="mx-auto w-full max-w-screen-2xl px-6 pb-6 pt-6 md:px-10 lg:px-14"
+          >
+            <div id="app-grid" className="h-[calc(100vh-var(--topbar-h,64px))] overflow-hidden">
+              <div className="grid h-full grid-cols-1 gap-6 lg:grid-cols-[360px_minmax(560px,1fr)_360px]">
+                <aside
+                  id="left-col"
+                  className="order-2 flex h-full min-h-0 flex-col overflow-auto rounded-2xl border border-emerald-100/60 bg-white/85 p-4 shadow-sm lg:order-1"
+                  aria-label="Network overview panel"
+                >
+                  <div className="flex items-center justify-between rounded-xl bg-white/70 px-3 py-2 text-xs font-semibold text-slate-600">
+                    <span>{simpleHud ? 'Simple view' : 'Detailed view'}</span>
+                    <div className="inline-flex overflow-hidden rounded-lg border border-emerald-100/80 bg-white/60 text-[11px] font-medium">
+                      <button
+                        type="button"
+                        onClick={() => setSimpleHud(true)}
+                        aria-pressed={simpleHud}
+                        className={`px-3 py-1 transition-colors ${simpleHud ? 'bg-emerald-100 text-emerald-700' : 'text-slate-500 hover:bg-emerald-50/40 hover:text-slate-700'}`}
+                      >
+                        Simple view
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSimpleHud(false)}
+                        aria-pressed={!simpleHud}
+                        className={`px-3 py-1 transition-colors ${!simpleHud ? 'bg-emerald-100 text-emerald-700' : 'text-slate-500 hover:bg-emerald-50/40 hover:text-slate-700'}`}
+                      >
+                        Detailed view
+                      </button>
                     </div>
                   </div>
-                </div>
-                <div className="flex-1 min-h-0 px-4 py-4">
-                  <div className="flex h-full w-full items-center justify-center">
-                    <div
-                      className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-emerald-50/70 via-sky-50 to-white"
-                      style={{ width: mapSquarePx, height: mapSquarePx }}
-                    >
-                      <MapToast toasts={banners.mapQueue} onDismiss={banners.dismiss} />
-                      <div className="flex h-full w-full items-start justify-center">
-                        <div className="relative" style={{ width: displaySize, height: displaySize }}>
-                          <div className="absolute inset-0">
-                            {Array.from({ length: paddedGrid }).map((_, y) => (
-                              <div key={y} className="flex">
-                              {Array.from({ length: paddedGrid }).map((__, x) => {
-                                const gridX = x - visualPadding;
-                                const gridY = y - visualPadding;
-                                const isRealCell = gridX >= 0 && gridX < GRID && gridY >= 0 && gridY < GRID;
-                                const key = `${gridX},${gridY}`;
-                                const popVal = isRealCell ? land.pop[gridY][gridX] : 0;
-                                const jobsVal = isRealCell ? land.jobs[gridY][gridX] : 0;
-                                const poi = isRealCell ? poiMap.get(key) : null;
-                                const densityLevel = isRealCell ? (densityLevels[gridY]?.[gridX] ?? 0) : 0;
-                                const baseIdx = Math.min(TILE_BASE_COLORS.length - 1, Math.max(0, popVal));
-                                const baseColor = TILE_BASE_COLORS[baseIdx] || TILE_BASE_COLORS[0];
-                                const shouldTint = showHeatmap && isRealCell;
-                                const tinted = shouldTint ? mixHexColor(baseColor, TILE_DENSITY_TINT, densityLevel * 0.8) : baseColor;
-                                const bg = isRealCell ? tinted : '#f6faf9';
-                                const outline = isRealCell
-                                  ? (jobsVal>0 ? `1px solid ${JOB_OUTLINE_COLOR}` : `1px solid ${IDLE_OUTLINE_COLOR}`)
-                                  : '1px solid rgba(148,163,184,0.25)';
-                                const glow = shouldTint && densityLevel > 0.05 ? `inset 0 0 0 1.5px rgba(58,174,161,${Math.min(0.35, densityLevel)})` : 'none';
-                                const sparkleOpacity = shouldTint && densityLevel > 0.25 ? Math.min(0.45, densityLevel) : 0;
-                                const house = isRealCell ? houseCells.get(key) : null;
-                                return (
-                                  <div
-                                    key={`${x}-${y}`}
-                                    onClick={isRealCell ? (e)=> handleCellClick(e, gridX, gridY) : undefined}
-                                    style={{ width: cellSize, height: cellSize, backgroundColor:bg, outline, boxShadow: glow, cursor: isRealCell ? 'crosshair' : 'default', position:'relative', overflow:'hidden', borderRadius:4 }}
-                                  >
-                                    {sparkleOpacity>0 && (
-                                      <div className="tile-sparkle pointer-events-none absolute inset-1 rounded-md bg-emerald-200/40" style={{ opacity: sparkleOpacity }} />
-                                    )}
-                                    {house && (
-                                      <div className="pointer-events-none absolute inset-0 grid place-items-center text-emerald-600" aria-hidden="true" style={{ fontSize: `${house.size}px` }}>
-                                        🏠
-                                      </div>
-                                    )}
-                                    {poi && <div style={{position:'absolute', inset:'0', display:'grid', placeItems:'center', fontSize:'12px'}}>{poiIcon(poi)}</div>}
-                                  </div>
-                                );
-                              })}
+                  <div className="mt-3">
+                    <div className="text-xs uppercase text-slate-500">Cash</div>
+                    <div className={`text-3xl font-semibold ${cash<0?'text-rose-600':'text-emerald-600'}`}>{fmtMoney(cash)}</div>
+                  </div>
+                  <div className="mt-3 flex-1 pr-1">
+                    {simpleHud ? simpleHudContent : detailedHudContent}
+                  </div>
+                </aside>
+                <section
+                  id="center-col"
+                  className="order-1 h-full overflow-hidden lg:order-2"
+                  aria-label="Active route map and details"
+                >
+                  <div ref={centerColRef} className="h-full">
+                    <div className="flex h-full flex-col rounded-2xl border border-emerald-100/60 bg-white/85 shadow-sm">
+                      <div className="shrink-0 border-b border-emerald-100/70 bg-white/70 px-4 py-3">
+                        <div className="flex flex-col gap-3">
+                          <div className="text-center">
+                            <h1 className="text-2xl font-semibold tracking-tight text-emerald-800">Transit Simulator</h1>
+                            <p className="text-sm text-slate-600">Tutorial City · Population {population.toLocaleString()} · Goal: {MODE_SHARE_TARGET}% for {MODE_SHARE_STREAK_DAYS} days</p>
+                            <p className="text-sm text-slate-700">
+                              Network grade: <span className="font-semibold text-emerald-700">{networkGrade ?? '—'}</span> · Citizens appreciate every comfy ride.
+                            </p>
+                          </div>
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                              <span className="inline-flex h-3 w-3 rounded-full" style={{ backgroundColor: activeRouteSummary?.color || '#0ea5e9' }} />
+                              <span>{activeRoute?.name || 'Route'}</span>
                             </div>
-                          ))}
-                        </div>
-                        <svg
-                          className="absolute inset-0 h-full w-full"
-                          width={displaySize}
-                          height={displaySize}
-                          viewBox={`0 0 ${displaySize} ${displaySize}`}
-                          preserveAspectRatio="none"
-                          style={{ pointerEvents:'none' }}
-                        >
-                          {routeSummaries.map(summary => (
-                            summary.polyline && (
-                              <polyline
-                                key={summary.id}
-                                points={summary.polyline}
-                                fill="none"
-                                stroke={summary.color}
-                                strokeWidth={summary.id === activeRouteId ? 4 : 2}
-                                strokeLinejoin="round"
-                                strokeLinecap="round"
-                                strokeOpacity={summary.id === activeRouteId ? 1 : 0.45}
-                              />
-                            )
-                          ))}
-                        </svg>
-                        {busVisible && busPosition && (
-                          <div
-                            className="pointer-events-none absolute z-30"
-                            style={{ left: busPosition.x, top: busPosition.y, transform: `translate(-50%, -50%) rotate(${busPosition.angle}rad)` }}
-                          >
-                            <span className="bus-emoji inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/85 text-lg shadow-lg ring-1 ring-emerald-200/80">
-                              🚌
+                            <div className="flex items-center gap-3 text-xs text-slate-600">
+                              <span>{activeRouteDailyRiders !== null ? `${Math.round(activeRouteDailyRiders).toLocaleString()} riders/day` : 'Add stops to peek at riders'}</span>
+                              <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-emerald-100/80 text-[11px] font-bold text-emerald-700">{activeRouteSummary?.grade ?? '–'}</span>
+                            </div>
+                          </div>
+                          <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-slate-600">
+                            <span className={`font-semibold ${activeThrottled ? 'text-amber-600' : 'text-slate-700'}`}>
+                              {activeActualVPH.toFixed(1)} / <span className={activeThrottled ? 'text-slate-400' : 'text-slate-500'}>{activeTargetVPH.toFixed(1)}</span> veh/hr
                             </span>
+                            <span>Round trip {activeRoundTripMinutes ? `${activeRoundTripMinutes} min` : '—'}</span>
+                          </div>
+                        </div>
+                      </div>
+                      <div ref={mapAreaRef} className="flex-1 overflow-hidden grid place-content-center px-4 py-4">
+                        <div
+                          key={canvasTick}
+                          className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-emerald-50/70 via-sky-50 to-white"
+                          style={{ width: canvasSize, height: canvasSize }}
+                        >
+                          <MapToast toasts={banners.mapQueue} onDismiss={banners.dismiss} />
+                          <div className="flex h-full w-full items-start justify-center">
+                            <div className="relative" style={{ width: displaySize, height: displaySize }}>
+                              <div className="absolute inset-0">
+                                {Array.from({ length: paddedGrid }).map((_, y) => (
+                                  <div key={y} className="flex">
+                                  {Array.from({ length: paddedGrid }).map((__, x) => {
+                                    const gridX = x - visualPadding;
+                                    const gridY = y - visualPadding;
+                                    const isRealCell = gridX >= 0 && gridX < GRID && gridY >= 0 && gridY < GRID;
+                                    const key = `${gridX},${gridY}`;
+                                    const popVal = isRealCell ? land.pop[gridY][gridX] : 0;
+                                    const jobsVal = isRealCell ? land.jobs[gridY][gridX] : 0;
+                                    const poi = isRealCell ? poiMap.get(key) : null;
+                                    const densityLevel = isRealCell ? (densityLevels[gridY]?.[gridX] ?? 0) : 0;
+                                    const baseIdx = Math.min(TILE_BASE_COLORS.length - 1, Math.max(0, popVal));
+                                    const baseColor = TILE_BASE_COLORS[baseIdx] || TILE_BASE_COLORS[0];
+                                    const shouldTint = showHeatmap && isRealCell;
+                                    const tinted = shouldTint ? mixHexColor(baseColor, TILE_DENSITY_TINT, densityLevel * 0.8) : baseColor;
+                                    const bg = isRealCell ? tinted : '#f6faf9';
+                                    const outline = isRealCell
+                                      ? (jobsVal>0 ? `1px solid ${JOB_OUTLINE_COLOR}` : `1px solid ${IDLE_OUTLINE_COLOR}`)
+                                      : '1px solid rgba(148,163,184,0.25)';
+                                    const glow = shouldTint && densityLevel > 0.05 ? `inset 0 0 0 1.5px rgba(58,174,161,${Math.min(0.35, densityLevel)})` : 'none';
+                                    const sparkleOpacity = shouldTint && densityLevel > 0.25 ? Math.min(0.45, densityLevel) : 0;
+                                    const house = isRealCell ? houseCells.get(key) : null;
+                                    return (
+                                      <div
+                                        key={`${x}-${y}`}
+                                        onClick={isRealCell ? (e)=> handleCellClick(e, gridX, gridY) : undefined}
+                                        style={{ width: cellSize, height: cellSize, backgroundColor:bg, outline, boxShadow: glow, cursor: isRealCell ? 'crosshair' : 'default', position:'relative', overflow:'hidden', borderRadius:4 }}
+                                      >
+                                        {sparkleOpacity>0 && (
+                                          <div className="tile-sparkle pointer-events-none absolute inset-1 rounded-md bg-emerald-200/40" style={{ opacity: sparkleOpacity }} />
+                                        )}
+                                        {house && (
+                                          <div className="pointer-events-none absolute inset-0 grid place-items-center text-emerald-600" aria-hidden="true" style={{ fontSize: `${house.size}px` }}>
+                                            🏠
+                                          </div>
+                                        )}
+                                        {poi && <div style={{position:'absolute', inset:'0', display:'grid', placeItems:'center', fontSize:'12px'}}>{poiIcon(poi)}</div>}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              ))}
+                            </div>
+                            <svg
+                              className="absolute inset-0 h-full w-full"
+                              width={displaySize}
+                              height={displaySize}
+                              viewBox={`0 0 ${displaySize} ${displaySize}`}
+                              preserveAspectRatio="none"
+                              style={{ pointerEvents:'none' }}
+                            >
+                              {routeSummaries.map(summary => (
+                                summary.polyline && (
+                                  <polyline
+                                    key={summary.id}
+                                    points={summary.polyline}
+                                    fill="none"
+                                    stroke={summary.color}
+                                    strokeWidth={summary.id === activeRouteId ? 4 : 2}
+                                    strokeLinejoin="round"
+                                    strokeLinecap="round"
+                                    strokeOpacity={summary.id === activeRouteId ? 1 : 0.45}
+                                  />
+                                )
+                              ))}
+                            </svg>
+                            {busVisible && busPosition && (
+                              <div
+                                className="pointer-events-none absolute z-30"
+                                style={{ left: busPosition.x, top: busPosition.y, transform: `translate(-50%, -50%) rotate(${busPosition.angle}rad)` }}
+                              >
+                                <span className="bus-emoji inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/85 text-lg shadow-lg ring-1 ring-emerald-200/80">
+                                  🚌
+                                </span>
+                              </div>
+                            )}
+                            {routeSummaries.map(summary => (
+                              summary.stops.map((point, idx) => (
+                                <div
+                                  key={`${summary.id}-${idx}`}
+                                  className="absolute -translate-x-1/2 -translate-y-1/2"
+                                  style={{ left: point.x * cellSize + mapOffset + cellSize/2, top: point.y * cellSize + mapOffset + cellSize/2 }}
+                                >
+                                  <div
+                                    className={`rounded-full border-2 ${summary.id === activeRouteId ? 'h-3.5 w-3.5' : 'h-2.5 w-2.5 opacity-80'}`}
+                                    style={{ borderColor: summary.color, backgroundColor: summary.id === activeRouteId ? summary.color : '#fff' }}
+                                  />
+                                </div>
+                              ))
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="shrink-0 border-t border-emerald-100/70 bg-white/70 px-4 py-2 text-xs text-slate-600">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <span className="text-[11px]">Click to add stops · Shift-click to remove · Pause to edit.</span>
+                          <label className="inline-flex items-center gap-2 text-xs font-medium text-slate-600">
+                            <input
+                              type="checkbox"
+                              checked={showHeatmap}
+                              onChange={(e) => setShowHeatmap(e.target.checked)}
+                              className="h-3.5 w-3.5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                            />
+                            <span>Show density heatmap</span>
+                          </label>
+                        </div>
+                        {routeSummaries.length > 0 && (
+                          <div className="mt-2 space-y-2 lg:hidden">
+                            <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Route Legend</div>
+                            <div className="mt-1 max-h-28 space-y-2 overflow-auto pr-1">
+                              {routeSummaries.map(summary => (
+                                <div
+                                  key={summary.id}
+                                  className="flex items-center justify-between gap-3 rounded-xl border border-emerald-100/70 bg-white/80 px-3 py-2 text-xs text-slate-600"
+                                >
+                                  <span className="flex items-center gap-2">
+                                    <span className="inline-flex h-2.5 w-2.5 rounded-full" style={{ backgroundColor: summary.color }} />
+                                    <span className="font-medium text-slate-700">{summary.name}</span>
+                                  </span>
+                                  <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-emerald-100/80 text-[11px] font-semibold text-emerald-700">{summary.grade ?? '–'}</span>
+                                </div>
+                              ))}
+                            </div>
                           </div>
                         )}
-                        {routeSummaries.map(summary => (
-                          summary.stops.map((point, idx) => (
-                            <div
-                              key={`${summary.id}-${idx}`}
-                              className="absolute -translate-x-1/2 -translate-y-1/2"
-                              style={{ left: point.x * cellSize + mapOffset + cellSize/2, top: point.y * cellSize + mapOffset + cellSize/2 }}
-                            >
-                              <div
-                                className={`rounded-full border-2 ${summary.id === activeRouteId ? 'h-3.5 w-3.5' : 'h-2.5 w-2.5 opacity-80'}`}
-                                style={{ borderColor: summary.color, backgroundColor: summary.id === activeRouteId ? summary.color : '#fff' }}
-                              />
-                            </div>
-                          ))
-                        ))}
                       </div>
                     </div>
                   </div>
-                </div>
-              </div>
-              <div ref={mapFooterRef} className="border-t border-emerald-100/70 bg-white/70 px-4 py-3 text-xs text-slate-600">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <span className="text-[11px]">Click to add stops · Shift-click to remove · Pause to edit.</span>
-                    <label className="inline-flex items-center gap-2 text-xs font-medium text-slate-600">
-                      <input
-                        type="checkbox"
-                        checked={showHeatmap}
-                        onChange={(e) => setShowHeatmap(e.target.checked)}
-                        className="h-3.5 w-3.5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
-                      />
-                      <span>Show density heatmap</span>
-                    </label>
-                  </div>
-                  {routeSummaries.length > 0 && (
-                    <div className="mt-3 space-y-2 lg:hidden">
-                      <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Route Legend</div>
-                      <div className="mt-2 max-h-28 space-y-2 overflow-auto pr-1">
-                        {routeSummaries.map(summary => (
-                          <div
-                            key={summary.id}
-                            className="flex items-center justify-between gap-3 rounded-xl border border-emerald-100/70 bg-white/80 px-3 py-2 text-xs text-slate-600"
-                          >
-                            <span className="flex items-center gap-2">
-                              <span className="inline-flex h-2.5 w-2.5 rounded-full" style={{ backgroundColor: summary.color }} />
-                              <span className="font-medium text-slate-700">{summary.name}</span>
-                            </span>
-                            <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-emerald-100/80 text-[11px] font-semibold text-emerald-700">{summary.grade ?? '–'}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </section>
-              <aside
-                className="order-3 flex min-h-0 flex-col gap-4 overflow-y-auto rounded-2xl border border-emerald-100/60 bg-white/85 p-4 shadow-sm lg:order-3"
-                aria-label="Route management panel"
-              >
+                </section>
+                <aside
+                  id="right-col"
+                  className="order-3 flex h-full min-h-0 flex-col gap-4 overflow-auto rounded-2xl border border-emerald-100/60 bg-white/85 p-4 shadow-sm lg:order-3"
+                  aria-label="Route management panel"
+                >
                 <div>
                   <div className="flex items-center justify-between">
                     <div className="text-sm font-medium text-slate-900">Routes</div>
@@ -1433,10 +1426,9 @@
                     <button onClick={()=> hireDrivers(-10)} className="ml-1 rounded border border-emerald-200 bg-white/80 px-2 py-0.5 text-xs hover:bg-emerald-50/40">−10</button>
                   </div>
                 </div>
-              </aside>
+                </aside>
+              </div>
             </div>
-          </div>
-        </div>
           </main>
 
           {settingsOpen && (
