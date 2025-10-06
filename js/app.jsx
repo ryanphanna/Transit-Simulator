@@ -1168,7 +1168,7 @@
                     style={{ minHeight: mapAvailableHeight }}
                   >
                     <MapToast toasts={banners.mapQueue} onDismiss={banners.dismiss} />
-                    <div className="grid h-full w-full place-content-center">
+                    <div className="flex h-full w-full items-start justify-center">
                       <div className="relative" style={{ width: displaySize, height: displaySize }}>
                         <div className="absolute inset-0">
                           {Array.from({ length: paddedGrid }).map((_, y) => (
