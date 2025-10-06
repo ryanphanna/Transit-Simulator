@@ -456,8 +456,8 @@
     }, [routes, enrichedRoutes, routeEstimateMap, polylineFor, routeScoreAndGrade, ROUTE_COLORS]);
 
     useEffect(() => {
-      recomputeCellSize();
-    }, [recomputeCellSize, routeSummaries.length, topBarHeight]);
+      recomputeMapSize();
+    }, [recomputeMapSize, routeSummaries.length, topBarHeight]);
 
     const activeRouteSummary = useMemo(() => routeSummaries.find(r => r.id === activeRouteId) || null, [routeSummaries, activeRouteId]);
     const gradeOrder = ['F','D','C','B','A'];
@@ -1257,7 +1257,8 @@
                     </div>
                   </div>
                 </div>
-                <div ref={mapFooterRef} className="border-t border-emerald-100/70 bg-white/70 px-4 py-3 text-xs text-slate-600">
+              </div>
+              <div ref={mapFooterRef} className="border-t border-emerald-100/70 bg-white/70 px-4 py-3 text-xs text-slate-600">
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <span className="text-[11px]">Click to add stops · Shift-click to remove · Pause to edit.</span>
                     <label className="inline-flex items-center gap-2 text-xs font-medium text-slate-600">
