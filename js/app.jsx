@@ -1111,7 +1111,7 @@
                     {simpleHud ? simpleHudContent : detailedHudContent}
                   </div>
                 </aside>
-                <section
+                <div
                   id="center-col"
                   className="order-2 h-full min-h-0 overflow-hidden rounded-2xl border border-emerald-100/60 bg-white/85 shadow-sm lg:order-2"
                   aria-label="Active route map and details"
