@@ -61,6 +61,36 @@
     const [poiMap,setPoiMap]=useState(()=> generatePOIs(seed, START_POP));
     useEffect(()=> setPoiMap(generatePOIs(seed, population)), [seed, population]);
     const [densityLevels, setDensityLevels] = useState(() => createDensityGrid());
+    const houseCells = useMemo(() => {
+      if (!land?.pop || !Array.isArray(land.pop)) return new Map();
+      const pops = [];
+      for (let y = 0; y < GRID; y++) {
+        for (let x = 0; x < GRID; x++) {
+          const value = land.pop?.[y]?.[x] ?? 0;
+          pops.push(value);
+        }
+      }
+      if (!pops.length) return new Map();
+      const sorted = [...pops].sort((a, b) => a - b);
+      const cutoffIndex = Math.floor(sorted.length * 0.85);
+      const threshold = sorted[cutoffIndex] ?? 0;
+      const maxValue = sorted[sorted.length - 1] ?? threshold ?? 1;
+      const houses = new Map();
+      const poiKeys = new Set(poiMap ? Array.from(poiMap.keys()) : []);
+      for (let y = 0; y < GRID; y++) {
+        for (let x = 0; x < GRID; x++) {
+          const value = land.pop?.[y]?.[x] ?? 0;
+          const key = `${x},${y}`;
+          if (value < threshold) continue;
+          if (poiKeys.has(key)) continue;
+          const range = Math.max(1, maxValue - threshold);
+          const normalized = Math.min(1, Math.max(0, (value - threshold) / range));
+          const size = Math.round(12 + (16 - 12) * normalized);
+          houses.set(key, { size });
+        }
+      }
+      return houses;
+    }, [land, poiMap]);
 
     const [routes,setRoutes]=useState(()=>[
       { id: initialRouteId, name: `Route ${TS.routeSeq}`, stops: [], color: ROUTE_COLORS[0], targetVPH: DEFAULT_TARGET_VPH }
@@ -96,37 +126,82 @@
     const mapOffset = visualPadding * cellSize;
     const paddedGrid = GRID + visualPadding * 2;
     const mapContainerRef = useRef(null);
+    const centerRef = useRef(null);
+    const mapHeaderRef = useRef(null);
+    const mapFooterRef = useRef(null);
+    const topBarRef = useRef(null);
+    const [topBarHeight, setTopBarHeight] = useState(64);
+    const [mapAvailableHeight, setMapAvailableHeight] = useState(0);
+    const [showHeatmap, setShowHeatmap] = useState(false);
+    const [simpleHud, setSimpleHud] = useState(true);
     const [settingsOpen,setSettingsOpen]=useState(false);
     const recomputeCellSize = useCallback(() => {
-      const node = mapContainerRef.current;
-      if (!node) return;
-      const { clientWidth, clientHeight } = node;
-      if (!clientWidth || !clientHeight) return;
-      const desired = Math.min(clientWidth, clientHeight);
-      const next = clamp(Math.floor(desired / GRID), 14, 64);
+      const centerNode = centerRef.current;
+      if (!centerNode) return;
+      const headerHeight = mapHeaderRef.current ? mapHeaderRef.current.offsetHeight : 0;
+      const footerHeight = mapFooterRef.current ? mapFooterRef.current.offsetHeight : 0;
+      const parsePx = (value) => {
+        const num = parseFloat(value);
+        return Number.isFinite(num) ? num : 0;
+      };
+      const centerStyle = window.getComputedStyle(centerNode);
+      const paddingX = parsePx(centerStyle.paddingLeft) + parsePx(centerStyle.paddingRight);
+      const paddingY = parsePx(centerStyle.paddingTop) + parsePx(centerStyle.paddingBottom);
+      const rowGap = parsePx(centerStyle.rowGap || centerStyle.gap || '0');
+      const gapCount = 1 + (mapFooterRef.current ? 1 : 0);
+      const totalGapY = rowGap * gapCount;
+      const availH = centerNode.clientHeight - headerHeight - footerHeight - paddingY - totalGapY;
+      const availW = centerNode.clientWidth - paddingX;
+      if (!Number.isFinite(availH) || !Number.isFinite(availW)) return;
+      const usableH = Math.max(0, Math.floor(availH));
+      const usableW = Math.max(0, Math.floor(availW));
+      const desired = Math.floor(Math.min(usableH, usableW));
+      if (desired <= 0) return;
+      const next = Math.max(14, Math.floor(desired / GRID));
       const nextCanvas = next * GRID;
-      const extraHeight = Math.max(0, clientHeight - nextCanvas);
-      const paddingCells = Math.max(0, Math.min(2, Math.floor(extraHeight / (2 * next))));
-      setVisualPadding(prev => (prev === paddingCells ? prev : paddingCells));
+      setVisualPadding(prev => (prev === 0 ? prev : 0));
       setCellSize(prev => (prev === next ? prev : next));
-    }, []);
+      setMapAvailableHeight(prev => (prev === usableH ? prev : usableH));
+      if (TS) {
+        TS.CELL_SIZE = next;
+        TS.CANVAS_SIZE = nextCanvas;
+      }
+    }, [GRID]);
 
     useEffect(() => {
-      const node = mapContainerRef.current;
-      if (!node) return;
-      if (typeof ResizeObserver === 'function') {
-        const observer = new ResizeObserver(() => {
-          recomputeCellSize();
-        });
-        observer.observe(node);
-        recomputeCellSize();
-        return () => observer.disconnect();
-      }
-      recomputeCellSize();
       const handle = () => recomputeCellSize();
+      const nodes = [centerRef.current, mapContainerRef.current].filter(Boolean);
+      if (typeof ResizeObserver === 'function' && nodes.length) {
+        const observers = nodes.map(node => {
+          const observer = new ResizeObserver(handle);
+          observer.observe(node);
+          return observer;
+        });
+        handle();
+        return () => observers.forEach(observer => observer.disconnect());
+      }
+      handle();
       window.addEventListener('resize', handle);
       return () => window.removeEventListener('resize', handle);
     }, [recomputeCellSize]);
+
+    useEffect(() => {
+      const node = topBarRef.current;
+      if (!node) return;
+      const measure = () => {
+        const height = Math.round(node.getBoundingClientRect().height || 64);
+        setTopBarHeight(prev => (prev === height ? prev : height));
+      };
+      if (typeof ResizeObserver === 'function') {
+        const observer = new ResizeObserver(measure);
+        observer.observe(node);
+        measure();
+        return () => observer.disconnect();
+      }
+      measure();
+      window.addEventListener('resize', measure);
+      return () => window.removeEventListener('resize', measure);
+    }, []);
 
     useEffect(() => {
       TS.CELL_SIZE = cellSize;
@@ -377,6 +452,10 @@
         };
       });
     }, [routes, enrichedRoutes, routeEstimateMap, polylineFor, routeScoreAndGrade, ROUTE_COLORS]);
+
+    useEffect(() => {
+      recomputeCellSize();
+    }, [recomputeCellSize, routeSummaries.length, topBarHeight]);
 
     const activeRouteSummary = useMemo(() => routeSummaries.find(r => r.id === activeRouteId) || null, [routeSummaries, activeRouteId]);
     const gradeOrder = ['F','D','C','B','A'];
@@ -765,6 +844,96 @@
       ? Math.round(Math.min(1, Math.max(0, vehiclesInUse / fleet)) * 100)
       : 0;
 
+    const simpleHudContent = (
+      <div className="space-y-3 text-sm text-slate-700">
+        <div className="rounded-xl border border-emerald-100/70 bg-white/80 p-3">
+          <div className="text-xs uppercase text-slate-500">Riders / hr</div>
+          <div className="mt-1 text-2xl font-semibold text-slate-900">{Math.round(networkServedPH).toLocaleString()}</div>
+        </div>
+        <div className="rounded-xl border border-emerald-100/70 bg-white/80 p-3">
+          <div className="text-sm font-semibold text-slate-900">Vehicles in use</div>
+          <div className="mt-1 text-sm text-slate-700">
+            {vehiclesInUse} / Fleet: {fleet}
+            <span className="ml-1 text-slate-500">(Spare: {spareBuses})</span>
+          </div>
+          <div className="mt-2 flex items-center gap-0.5" aria-hidden>
+            {busUsageSlots.map((filled, idx) => (
+              <span key={idx} className={`text-[13px] leading-none ${filled ? 'text-emerald-600' : 'text-emerald-200/80'}`}>
+                🚌
+              </span>
+            ))}
+          </div>
+        </div>
+        <div className="rounded-xl border border-emerald-100/70 bg-white/80 p-3">
+          <div className="text-sm font-medium text-slate-600">Daily money</div>
+          <div className="mt-1 text-sm text-slate-700">
+            {fmtMoney(dailyIncome)} – {fmtMoney(dailyCosts)} = <span className={dailyNetClass}>{fmtMoney(dailyNet)}</span>
+          </div>
+        </div>
+        <div className="rounded-xl border border-emerald-100/70 bg-white/80 p-3">
+          <div className="text-sm font-medium text-slate-600">Network veh/hr</div>
+          <div className="mt-1 text-sm font-semibold text-slate-900">
+            {networkActualVPH.toFixed(1)} / <span className="text-slate-500">{networkTargetVPH.toFixed(1)}</span>
+          </div>
+        </div>
+      </div>
+    );
+
+    const detailedHudContent = (
+      <div className="space-y-3 text-xs text-slate-600">
+        <div className="rounded-xl border border-emerald-100/70 bg-emerald-50/60 p-3">
+          <div className="text-sm font-semibold text-slate-900">Operations</div>
+          <div className="mt-2 space-y-2">
+            <div className="text-sm font-semibold text-slate-900">
+              Vehicles in use: {vehiclesInUse} / Fleet: {fleet}
+              <span className="ml-1 font-normal text-slate-600">(Spare: {spareBuses})</span>
+            </div>
+            <div className="flex items-center justify-between text-sm">
+              <span>Utilization</span>
+              <span className="font-semibold text-slate-900">{fleetUtilPercent}%</span>
+            </div>
+            <div className="mt-1 flex items-center gap-0.5" aria-hidden>
+              {busUsageSlots.map((filled, idx) => (
+                <span key={idx} className={`text-[13px] leading-none ${filled ? 'text-emerald-600' : 'text-emerald-200/80'}`}>
+                  🚌
+                </span>
+              ))}
+            </div>
+            <div className="flex items-center justify-between"><span>Depot capacity</span><span className="font-semibold text-slate-900">{depotCap}</span></div>
+            <div className="flex items-center justify-between"><span>Drivers</span><span className="font-semibold text-slate-900">{drivers} ({driversHours} drv-hrs)</span></div>
+          </div>
+          <div className="mt-2 text-xs text-slate-500">Service {serviceStartHour}:00–{serviceEndHour}:00 ({serviceHoursToday} hrs)</div>
+        </div>
+        <div className="rounded-xl border border-emerald-100/70 bg-emerald-50/60 p-3">
+          <div className="text-sm font-semibold text-slate-900">Performance</div>
+          <div className="mt-2 space-y-1">
+            <div className="flex items-center justify-between"><span>Mode share</span><span className="font-semibold text-slate-900">{modeShare.toFixed(1)}%</span></div>
+            <div className="flex items-center justify-between"><span>Average speed</span><span className="font-semibold text-slate-900">{effSpeed.toFixed(1)} km/h</span></div>
+            <div className="flex items-center justify-between">
+              <span className="flex items-center gap-1">Actual veh/hr<InfoTip text="After capacity limits (fleet, drivers, depot)." /></span>
+              <span className="font-semibold text-slate-900">{networkActualVPH.toFixed(1)}</span>
+            </div>
+            <div className="flex items-center justify-between"><span>Capacity / hr</span><span className="font-semibold text-slate-900">{Math.round(networkCapacityPH).toLocaleString()}</span></div>
+            <div className="flex items-center justify-between"><span>Riders / hr</span><span className="font-semibold text-slate-900">{Math.round(networkServedPH).toLocaleString()}</span></div>
+            <div className="flex items-center justify-between"><span>Load factor</span><span className="font-semibold text-slate-900">{(loadFactor*100).toFixed(0)}%</span></div>
+          </div>
+        </div>
+        <div className="rounded-xl border border-emerald-100/70 bg-emerald-50/60 p-3">
+          <div className="text-sm font-semibold text-slate-900">Finance</div>
+          <div className="mt-2 flex flex-col gap-1">
+            <span className="font-medium text-slate-600">Daily money:</span>
+            <span>{fmtMoney(dailyIncome)} – {fmtMoney(dailyCosts)} = <span className={dailyNetClass}>{fmtMoney(dailyNet)}</span></span>
+          </div>
+          <div className="mt-3">
+            <div className="flex justify-between text-xs"><span>Transit mode share</span><span>{modeShare.toFixed(2)}% / {MODE_SHARE_TARGET}%</span></div>
+            <div className="mt-1 h-2 overflow-hidden rounded-full bg-emerald-100/70">
+              <div className="h-full bg-emerald-400" style={{ width: `${Math.min(100, (modeShare/MODE_SHARE_TARGET)*100)}%` }} />
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+
     const handleToggleRunning = () => {
       if(!running){
         setAutoStarted(true);
@@ -851,7 +1020,7 @@
     <React.Fragment>
       <div className="relative min-h-screen w-full bg-gradient-to-b from-sky-50 via-emerald-50/40 to-white text-slate-900">
           {banners.hudView}
-          <header className="sticky top-0 z-40 border-b border-emerald-100/60 bg-white/80 backdrop-blur">
+          <header ref={topBarRef} className="sticky top-0 z-40 border-b border-emerald-100/60 bg-white/80 backdrop-blur">
             <div className="mx-auto flex w-full max-w-screen-2xl flex-wrap items-center justify-between gap-4 px-6 py-3 text-sm text-slate-700 md:px-10 lg:px-14">
               <div className="flex flex-wrap items-center gap-2 sm:gap-3">
                 <span className="font-semibold text-slate-900">
@@ -909,103 +1078,97 @@
             </div>
           </header>
 
-          <main className="mx-auto w-full max-w-screen-2xl px-6 py-6 md:px-10 lg:px-14">
-            <div className="flex flex-col items-center text-center">
-              <h1 className="text-2xl font-semibold tracking-tight text-emerald-800">Transit Simulator</h1>
-              <p className="text-sm text-slate-600">Tutorial City · Population {population.toLocaleString()} · Goal: {MODE_SHARE_TARGET}% for {MODE_SHARE_STREAK_DAYS} days</p>
-              <p className="mt-1 text-sm text-slate-700">
-                Network grade: <span className="font-semibold text-emerald-700">{networkGrade ?? '—'}</span> · Citizens appreciate every comfy ride.
-              </p>
-            </div>
+          <main
+            className="mx-auto w-full max-w-screen-2xl px-6 pb-6 pt-6 md:px-10 lg:px-14"
+            style={{ minHeight: `calc(100vh - ${topBarHeight}px)` }}
+          >
+            <div className="flex min-h-full flex-col">
+              <div className="flex flex-col items-center text-center">
+                <h1 className="text-2xl font-semibold tracking-tight text-emerald-800">Transit Simulator</h1>
+                <p className="text-sm text-slate-600">Tutorial City · Population {population.toLocaleString()} · Goal: {MODE_SHARE_TARGET}% for {MODE_SHARE_STREAK_DAYS} days</p>
+                <p className="mt-1 text-sm text-slate-700">
+                  Network grade: <span className="font-semibold text-emerald-700">{networkGrade ?? '—'}</span> · Citizens appreciate every comfy ride.
+                </p>
+              </div>
 
-            <div className="grid min-h-[calc(100vh-8rem)] grid-cols-1 items-stretch gap-6 pt-6 pb-12 sm:px-2 lg:grid-cols-[320px_minmax(0,1fr)_340px]">
+              <div className="mt-6 flex-1 sm:px-2">
+                <div className="grid h-full min-h-0 grid-cols-1 items-stretch gap-6 lg:grid-cols-[320px_minmax(0,1fr)_340px]">
               <aside
-                className="order-2 flex h-full flex-col gap-4 overflow-y-auto rounded-2xl border border-emerald-100/60 bg-white/85 p-4 shadow-sm lg:order-1"
+                className="order-2 flex min-h-0 flex-col rounded-2xl border border-emerald-100/60 bg-white/85 p-4 shadow-sm lg:order-1"
                 aria-label="Network overview panel"
               >
-                <div>
+                <div className="flex items-center justify-between rounded-xl bg-white/70 px-3 py-2 text-xs font-semibold text-slate-600">
+                  <span>{simpleHud ? 'Simple view' : 'Detailed view'}</span>
+                  <div className="inline-flex overflow-hidden rounded-lg border border-emerald-100/80 bg-white/60 text-[11px] font-medium">
+                    <button
+                      type="button"
+                      onClick={() => setSimpleHud(true)}
+                      aria-pressed={simpleHud}
+                      className={`px-3 py-1 transition-colors ${simpleHud ? 'bg-emerald-100 text-emerald-700' : 'text-slate-500 hover:bg-emerald-50/40 hover:text-slate-700'}`}
+                    >
+                      Simple view
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSimpleHud(false)}
+                      aria-pressed={!simpleHud}
+                      className={`px-3 py-1 transition-colors ${!simpleHud ? 'bg-emerald-100 text-emerald-700' : 'text-slate-500 hover:bg-emerald-50/40 hover:text-slate-700'}`}
+                    >
+                      Detailed view
+                    </button>
+                  </div>
+                </div>
+                <div className="mt-4">
                   <div className="text-xs uppercase text-slate-500">Cash</div>
                   <div className={`text-3xl font-semibold ${cash<0?'text-rose-600':'text-emerald-600'}`}>{fmtMoney(cash)}</div>
                 </div>
-                <div className="space-y-3 text-xs text-slate-600">
-                  <div className="rounded-xl border border-emerald-100/70 bg-emerald-50/60 p-3">
-                    <div className="text-sm font-semibold text-slate-900">Operations</div>
-                    <div className="mt-2 space-y-2">
-                      <div className="text-sm font-semibold text-slate-900">
-                        Vehicles in use: {vehiclesInUse} / Fleet: {fleet}
-                        <span className="ml-1 font-normal text-slate-600">(Spare: {spareBuses})</span>
-                      </div>
-                      <div className="flex items-center justify-between text-sm">
-                        <span>Utilization</span>
-                        <span className="font-semibold text-slate-900">{fleetUtilPercent}%</span>
-                      </div>
-                      <div className="mt-1 flex items-center gap-0.5" aria-hidden>
-                        {busUsageSlots.map((filled, idx) => (
-                          <span key={idx} className={`text-[13px] leading-none ${filled ? 'text-emerald-600' : 'text-emerald-200/80'}`}>
-                            🚌
-                          </span>
-                        ))}
-                      </div>
-                      <div className="flex items-center justify-between"><span>Depot capacity</span><span className="font-semibold text-slate-900">{depotCap}</span></div>
-                      <div className="flex items-center justify-between"><span>Drivers</span><span className="font-semibold text-slate-900">{drivers} ({driversHours} drv-hrs)</span></div>
-                    </div>
-                    <div className="mt-2 text-xs text-slate-500">Service {serviceStartHour}:00–{serviceEndHour}:00 ({serviceHoursToday} hrs)</div>
-                  </div>
-                  <div className="rounded-xl border border-emerald-100/70 bg-emerald-50/60 p-3">
-                    <div className="text-sm font-semibold text-slate-900">Performance</div>
-                    <div className="mt-2 space-y-1">
-                      <div className="flex items-center justify-between"><span>Mode share</span><span className="font-semibold text-slate-900">{modeShare.toFixed(1)}%</span></div>
-                      <div className="flex items-center justify-between"><span>Average speed</span><span className="font-semibold text-slate-900">{effSpeed.toFixed(1)} km/h</span></div>
-                      <div className="flex items-center justify-between"><span className="flex items-center gap-1">Actual veh/hr<InfoTip text="After capacity limits (fleet, drivers, depot)." /></span><span className="font-semibold text-slate-900">{networkActualVPH.toFixed(1)}</span></div>
-                      <div className="flex items-center justify-between"><span>Capacity / hr</span><span className="font-semibold text-slate-900">{Math.round(networkCapacityPH).toLocaleString()}</span></div>
-                      <div className="flex items-center justify-between"><span>Riders / hr</span><span className="font-semibold text-slate-900">{Math.round(networkServedPH).toLocaleString()}</span></div>
-                      <div className="flex items-center justify-between"><span>Load factor</span><span className="font-semibold text-slate-900">{(loadFactor*100).toFixed(0)}%</span></div>
-                    </div>
-                  </div>
-                  <div className="rounded-xl border border-emerald-100/70 bg-emerald-50/60 p-3">
-                    <div className="flex items-center justify-between"><span>Network target veh/hr</span><span className="font-semibold text-slate-900">{networkTargetVPH.toFixed(1)}</span></div>
-                    <div className="mt-1 flex items-center justify-between"><span>Network actual veh/hr</span><span className="font-semibold text-slate-900">{networkActualVPH.toFixed(1)}</span></div>
-                    <div className="mt-2 flex items-center justify-between"><span>Active round trip</span><span className="font-semibold text-slate-900">{activeRoundTripMinutes ? `${activeRoundTripMinutes} min` : '—'}</span></div>
-                  </div>
-                  <div className="rounded-xl border border-emerald-100/70 bg-emerald-50/60 p-3">
-                    <div className="flex items-center justify-between"><span>Estimated riders/day</span><span className="font-semibold text-slate-900">{Number.isFinite(networkRidersPerDay) ? Math.round(networkRidersPerDay).toLocaleString() : '—'}</span></div>
-                    <div className="mt-2 flex flex-col gap-1">
-                      <span className="font-medium text-slate-600">Daily money:</span>
-                      <span>{fmtMoney(dailyIncome)} – {fmtMoney(dailyCosts)} = <span className={dailyNetClass}>{fmtMoney(dailyNet)}</span></span>
-                    </div>
-                    <div className="mt-3">
-                      <div className="flex justify-between text-xs"><span>Transit mode share</span><span>{modeShare.toFixed(2)}% / {MODE_SHARE_TARGET}%</span></div>
-                      <div className="mt-1 h-2 overflow-hidden rounded-full bg-emerald-100/70">
-                        <div className="h-full bg-emerald-400" style={{ width: `${Math.min(100, (modeShare/MODE_SHARE_TARGET)*100)}%` }} />
-                      </div>
-                    </div>
-                  </div>
+                <div className="mt-4 flex-1 overflow-y-auto pr-1">
+                  {simpleHud ? simpleHudContent : detailedHudContent}
                 </div>
               </aside>
               <section
-                className="order-1 flex h-full min-h-[420px] min-w-0 flex-col gap-4 rounded-2xl border border-emerald-100/60 bg-white/85 p-4 shadow-sm lg:order-2"
+                ref={centerRef}
+                className="order-1 flex min-h-0 flex-col gap-4 rounded-2xl border border-emerald-100/60 bg-white/85 p-4 shadow-sm lg:order-2"
                 aria-label="Active route map and details"
               >
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                    <span className="inline-flex h-3 w-3 rounded-full" style={{ backgroundColor: activeRouteSummary?.color || '#0ea5e9' }} />
-                    <span>{activeRoute?.name || 'Route'}</span>
+                <div ref={mapHeaderRef} className="flex flex-col gap-3">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                      <span className="inline-flex h-3 w-3 rounded-full" style={{ backgroundColor: activeRouteSummary?.color || '#0ea5e9' }} />
+                      <span>{activeRoute?.name || 'Route'}</span>
+                    </div>
+                    <div className="flex items-center gap-3 text-xs text-slate-600">
+                      <span>{activeRouteDailyRiders !== null ? `${Math.round(activeRouteDailyRiders).toLocaleString()} riders/day` : 'Add stops to peek at riders'}</span>
+                      <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-emerald-100/80 text-[11px] font-bold text-emerald-700">{activeRouteSummary?.grade ?? '–'}</span>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-3 text-xs text-slate-600">
-                    <span>{activeRouteDailyRiders !== null ? `${Math.round(activeRouteDailyRiders).toLocaleString()} riders/day` : 'Add stops to peek at riders'}</span>
-                    <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-emerald-100/80 text-[11px] font-bold text-emerald-700">{activeRouteSummary?.grade ?? '–'}</span>
+                  <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-slate-600">
+                    <span className={`font-semibold ${activeThrottled ? 'text-amber-600' : 'text-slate-700'}`}>
+                      {activeActualVPH.toFixed(1)} / <span className={activeThrottled ? 'text-slate-400' : 'text-slate-500'}>{activeTargetVPH.toFixed(1)}</span> veh/hr
+                    </span>
+                    <span>Round trip {activeRoundTripMinutes ? `${activeRoundTripMinutes} min` : '—'}</span>
                   </div>
-                </div>
-                <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-slate-600">
-                  <span className={`font-semibold ${activeThrottled ? 'text-amber-600' : 'text-slate-700'}`}>
-                    {activeActualVPH.toFixed(1)} / <span className={activeThrottled ? 'text-slate-400' : 'text-slate-500'}>{activeTargetVPH.toFixed(1)}</span> veh/hr
-                  </span>
-                  <span>Round trip {activeRoundTripMinutes ? `${activeRoundTripMinutes} min` : '—'}</span>
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-500">
+                    <span>Click to add stops · Shift-click to remove · Pause to edit.</span>
+                    <label className="inline-flex items-center gap-2 text-xs font-medium text-slate-600">
+                      <input
+                        type="checkbox"
+                        checked={showHeatmap}
+                        onChange={(e) => setShowHeatmap(e.target.checked)}
+                        className="h-3.5 w-3.5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                      />
+                      <span>Show density heatmap</span>
+                    </label>
+                  </div>
                 </div>
                 <div className="flex flex-1 min-h-0 flex-col gap-3">
-                  <div ref={mapContainerRef} className="relative flex w-full flex-1 items-center justify-center overflow-hidden rounded-2xl bg-gradient-to-br from-emerald-50/70 via-sky-50 to-white">
+                  <div
+                    ref={mapContainerRef}
+                    className="relative flex-1 overflow-hidden rounded-2xl bg-gradient-to-br from-emerald-50/70 via-sky-50 to-white"
+                    style={{ minHeight: mapAvailableHeight }}
+                  >
                     <MapToast toasts={banners.mapQueue} onDismiss={banners.dismiss} />
-                    <div className="grid h-full w-full place-items-center">
+                    <div className="grid h-full w-full place-content-center">
                       <div className="relative" style={{ width: displaySize, height: displaySize }}>
                         <div className="absolute inset-0">
                           {Array.from({ length: paddedGrid }).map((_, y) => (
@@ -1021,13 +1184,15 @@
                                 const densityLevel = isRealCell ? (densityLevels[gridY]?.[gridX] ?? 0) : 0;
                                 const baseIdx = Math.min(TILE_BASE_COLORS.length - 1, Math.max(0, popVal));
                                 const baseColor = TILE_BASE_COLORS[baseIdx] || TILE_BASE_COLORS[0];
-                                const tinted = isRealCell ? mixHexColor(baseColor, TILE_DENSITY_TINT, densityLevel * 0.8) : '#f6faf9';
+                                const shouldTint = showHeatmap && isRealCell;
+                                const tinted = shouldTint ? mixHexColor(baseColor, TILE_DENSITY_TINT, densityLevel * 0.8) : baseColor;
                                 const bg = isRealCell ? tinted : '#f6faf9';
                                 const outline = isRealCell
                                   ? (jobsVal>0 ? `1px solid ${JOB_OUTLINE_COLOR}` : `1px solid ${IDLE_OUTLINE_COLOR}`)
                                   : '1px solid rgba(148,163,184,0.25)';
-                                const glow = densityLevel > 0.05 ? `inset 0 0 0 1.5px rgba(58,174,161,${Math.min(0.35, densityLevel)})` : 'none';
-                                const sparkleOpacity = densityLevel > 0.25 ? Math.min(0.45, densityLevel) : 0;
+                                const glow = shouldTint && densityLevel > 0.05 ? `inset 0 0 0 1.5px rgba(58,174,161,${Math.min(0.35, densityLevel)})` : 'none';
+                                const sparkleOpacity = shouldTint && densityLevel > 0.25 ? Math.min(0.45, densityLevel) : 0;
+                                const house = isRealCell ? houseCells.get(key) : null;
                                 return (
                                   <div
                                     key={`${x}-${y}`}
@@ -1036,6 +1201,11 @@
                                   >
                                     {sparkleOpacity>0 && (
                                       <div className="tile-sparkle pointer-events-none absolute inset-1 rounded-md bg-emerald-200/40" style={{ opacity: sparkleOpacity }} />
+                                    )}
+                                    {house && (
+                                      <div className="pointer-events-none absolute inset-0 grid place-items-center text-emerald-600" aria-hidden="true" style={{ fontSize: `${house.size}px` }}>
+                                        🏠
+                                      </div>
                                     )}
                                     {poi && <div style={{position:'absolute', inset:'0', display:'grid', placeItems:'center', fontSize:'12px'}}>{poiIcon(poi)}</div>}
                                   </div>
@@ -1095,7 +1265,7 @@
                     </div>
                   </div>
                   {routeSummaries.length > 0 && (
-                    <div className="lg:hidden">
+                    <div ref={mapFooterRef} className="lg:hidden">
                       <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Route Legend</div>
                       <div className="mt-2 max-h-28 space-y-2 overflow-auto pr-1">
                         {routeSummaries.map(summary => (
@@ -1113,11 +1283,10 @@
                       </div>
                     </div>
                   )}
-                  <p className="text-center text-xs text-slate-500">Click to add stops · Shift removes · Pause to tweak at your own pace</p>
                 </div>
               </section>
               <aside
-                className="order-3 flex h-full flex-col gap-4 overflow-y-auto rounded-2xl border border-emerald-100/60 bg-white/85 p-4 shadow-sm lg:order-3"
+                className="order-3 flex min-h-0 flex-col gap-4 overflow-y-auto rounded-2xl border border-emerald-100/60 bg-white/85 p-4 shadow-sm lg:order-3"
                 aria-label="Route management panel"
               >
                 <div>
@@ -1165,7 +1334,7 @@
                   <div className="text-sm font-medium text-slate-900">Selected Route</div>
                   <div className="mt-2 space-y-2">
                     <div className="flex items-center justify-between">
-                      <span>Actual / Target</span>
+                      <span className="flex items-center gap-1">Actual / Target<InfoTip text="Actual is capped by fleet, drivers, and depot." /></span>
                       <span
                         className={`font-semibold ${activeThrottled ? 'text-amber-600' : 'text-slate-900'}`}
                         title={activeThrottled ? 'Limited by fleet/drivers/depot.' : undefined}
@@ -1259,6 +1428,8 @@
                 </div>
               </aside>
             </div>
+          </div>
+        </div>
           </main>
 
           {settingsOpen && (
