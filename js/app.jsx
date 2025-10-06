@@ -1283,7 +1283,7 @@
                       </div>
                     </div>
                   </div>
-                </section>
+                </div>
                 <aside
                   id="right-col"
                   className="order-3 flex h-full min-h-0 flex-col gap-4 overflow-auto rounded-2xl border border-emerald-100/60 bg-white/85 p-4 shadow-sm lg:order-3"
