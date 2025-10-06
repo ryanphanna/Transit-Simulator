@@ -125,65 +125,67 @@
     const displaySize = canvasSize + visualPadding * 2 * cellSize;
     const mapOffset = visualPadding * cellSize;
     const paddedGrid = GRID + visualPadding * 2;
-    const mapContainerRef = useRef(null);
-    const centerRef = useRef(null);
+    const mapCardRef = useRef(null);
     const mapHeaderRef = useRef(null);
     const mapFooterRef = useRef(null);
+    const [mapSquarePx, setMapSquarePx] = useState(480);
     const topBarRef = useRef(null);
     const [topBarHeight, setTopBarHeight] = useState(64);
-    const [mapAvailableHeight, setMapAvailableHeight] = useState(0);
     const [showHeatmap, setShowHeatmap] = useState(false);
     const [simpleHud, setSimpleHud] = useState(true);
     const [settingsOpen,setSettingsOpen]=useState(false);
-    const recomputeCellSize = useCallback(() => {
-      const centerNode = centerRef.current;
-      if (!centerNode) return;
-      const headerHeight = mapHeaderRef.current ? mapHeaderRef.current.offsetHeight : 0;
-      const footerHeight = mapFooterRef.current ? mapFooterRef.current.offsetHeight : 0;
+    const recomputeMapSize = useCallback(() => {
+      const card = mapCardRef.current;
+      if (!card) return;
+      const rect = card.getBoundingClientRect();
+      const top = Number.isFinite(rect.top) ? rect.top : 0;
+      const availCardH = Math.max(200, Math.floor(window.innerHeight - top - 16));
+      card.style.height = `${availCardH}px`;
+
+      const headerH = mapHeaderRef.current?.offsetHeight || 0;
+      const footerH = mapFooterRef.current?.offsetHeight || 0;
+      const style = window.getComputedStyle(card);
       const parsePx = (value) => {
         const num = parseFloat(value);
         return Number.isFinite(num) ? num : 0;
       };
-      const centerStyle = window.getComputedStyle(centerNode);
-      const paddingX = parsePx(centerStyle.paddingLeft) + parsePx(centerStyle.paddingRight);
-      const paddingY = parsePx(centerStyle.paddingTop) + parsePx(centerStyle.paddingBottom);
-      const rowGap = parsePx(centerStyle.rowGap || centerStyle.gap || '0');
-      const gapCount = 1 + (mapFooterRef.current ? 1 : 0);
-      const totalGapY = rowGap * gapCount;
-      const availH = centerNode.clientHeight - headerHeight - footerHeight - paddingY - totalGapY;
-      const availW = centerNode.clientWidth - paddingX;
-      if (!Number.isFinite(availH) || !Number.isFinite(availW)) return;
-      const usableH = Math.max(0, Math.floor(availH));
-      const usableW = Math.max(0, Math.floor(availW));
-      const desired = Math.floor(Math.min(usableH, usableW));
-      if (desired <= 0) return;
-      const next = Math.max(14, Math.floor(desired / GRID));
-      const nextCanvas = next * GRID;
+      const padY = parsePx(style.paddingTop) + parsePx(style.paddingBottom);
+      const padX = parsePx(style.paddingLeft) + parsePx(style.paddingRight);
+
+      const innerH = Math.max(100, availCardH - headerH - footerH - padY);
+      const innerW = Math.max(100, card.clientWidth - padX);
+      if (!Number.isFinite(innerH) || !Number.isFinite(innerW)) return;
+
+      const desiredSquare = Math.floor(Math.min(innerH, innerW));
+      if (desiredSquare <= 0) return;
+
+      const nextCell = Math.max(14, Math.floor(desiredSquare / GRID));
+      const nextCanvas = nextCell * GRID;
+
       setVisualPadding(prev => (prev === 0 ? prev : 0));
-      setCellSize(prev => (prev === next ? prev : next));
-      setMapAvailableHeight(prev => (prev === usableH ? prev : usableH));
+      setCellSize(prev => (prev === nextCell ? prev : nextCell));
+      setMapSquarePx(prev => (prev === nextCanvas ? prev : nextCanvas));
+
       if (TS) {
-        TS.CELL_SIZE = next;
+        TS.CELL_SIZE = nextCell;
         TS.CANVAS_SIZE = nextCanvas;
       }
     }, [GRID]);
 
     useEffect(() => {
-      const handle = () => recomputeCellSize();
-      const nodes = [centerRef.current, mapContainerRef.current].filter(Boolean);
-      if (typeof ResizeObserver === 'function' && nodes.length) {
-        const observers = nodes.map(node => {
-          const observer = new ResizeObserver(handle);
-          observer.observe(node);
-          return observer;
-        });
-        handle();
-        return () => observers.forEach(observer => observer.disconnect());
+      recomputeMapSize();
+      let ro;
+      if (typeof ResizeObserver === 'function' && mapCardRef.current) {
+        ro = new ResizeObserver(() => recomputeMapSize());
+        ro.observe(mapCardRef.current);
       }
-      handle();
-      window.addEventListener('resize', handle);
-      return () => window.removeEventListener('resize', handle);
-    }, [recomputeCellSize]);
+      const onResize = () => recomputeMapSize();
+      window.addEventListener('resize', onResize);
+      return () => {
+        if (ro) ro.disconnect();
+        window.removeEventListener('resize', onResize);
+      };
+    }, [recomputeMapSize]);
 
     useEffect(() => {
       const node = topBarRef.current;
@@ -1091,8 +1093,8 @@
                 </p>
               </div>
 
-              <div className="mt-6 flex-1 sm:px-2">
-                <div className="grid h-full min-h-0 grid-cols-1 items-stretch gap-6 lg:grid-cols-[320px_minmax(0,1fr)_340px]">
+              <div className="mt-6 flex-1 min-h-0 sm:px-2">
+                <div className="grid h-full min-h-0 grid-cols-1 items-stretch gap-6 lg:grid-cols-[360px_minmax(520px,1fr)_360px]">
               <aside
                 className="order-2 flex min-h-0 flex-col rounded-2xl border border-emerald-100/60 bg-white/85 p-4 shadow-sm lg:order-1"
                 aria-label="Network overview panel"
@@ -1127,52 +1129,42 @@
                 </div>
               </aside>
               <section
-                ref={centerRef}
-                className="order-1 flex min-h-0 flex-col gap-4 rounded-2xl border border-emerald-100/60 bg-white/85 p-4 shadow-sm lg:order-2"
+                ref={mapCardRef}
+                className="order-1 flex min-h-0 flex-col overflow-hidden rounded-2xl border border-emerald-100/60 bg-white/85 shadow-sm lg:order-2"
                 aria-label="Active route map and details"
               >
-                <div ref={mapHeaderRef} className="flex flex-col gap-3">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                      <span className="inline-flex h-3 w-3 rounded-full" style={{ backgroundColor: activeRouteSummary?.color || '#0ea5e9' }} />
-                      <span>{activeRoute?.name || 'Route'}</span>
+                <div ref={mapHeaderRef} className="border-b border-emerald-100/70 bg-white/70 px-4 py-3">
+                  <div className="flex flex-col gap-3">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                        <span className="inline-flex h-3 w-3 rounded-full" style={{ backgroundColor: activeRouteSummary?.color || '#0ea5e9' }} />
+                        <span>{activeRoute?.name || 'Route'}</span>
+                      </div>
+                      <div className="flex items-center gap-3 text-xs text-slate-600">
+                        <span>{activeRouteDailyRiders !== null ? `${Math.round(activeRouteDailyRiders).toLocaleString()} riders/day` : 'Add stops to peek at riders'}</span>
+                        <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-emerald-100/80 text-[11px] font-bold text-emerald-700">{activeRouteSummary?.grade ?? '–'}</span>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-3 text-xs text-slate-600">
-                      <span>{activeRouteDailyRiders !== null ? `${Math.round(activeRouteDailyRiders).toLocaleString()} riders/day` : 'Add stops to peek at riders'}</span>
-                      <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-emerald-100/80 text-[11px] font-bold text-emerald-700">{activeRouteSummary?.grade ?? '–'}</span>
+                    <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-slate-600">
+                      <span className={`font-semibold ${activeThrottled ? 'text-amber-600' : 'text-slate-700'}`}>
+                        {activeActualVPH.toFixed(1)} / <span className={activeThrottled ? 'text-slate-400' : 'text-slate-500'}>{activeTargetVPH.toFixed(1)}</span> veh/hr
+                      </span>
+                      <span>Round trip {activeRoundTripMinutes ? `${activeRoundTripMinutes} min` : '—'}</span>
                     </div>
-                  </div>
-                  <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-slate-600">
-                    <span className={`font-semibold ${activeThrottled ? 'text-amber-600' : 'text-slate-700'}`}>
-                      {activeActualVPH.toFixed(1)} / <span className={activeThrottled ? 'text-slate-400' : 'text-slate-500'}>{activeTargetVPH.toFixed(1)}</span> veh/hr
-                    </span>
-                    <span>Round trip {activeRoundTripMinutes ? `${activeRoundTripMinutes} min` : '—'}</span>
-                  </div>
-                  <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-500">
-                    <span>Click to add stops · Shift-click to remove · Pause to edit.</span>
-                    <label className="inline-flex items-center gap-2 text-xs font-medium text-slate-600">
-                      <input
-                        type="checkbox"
-                        checked={showHeatmap}
-                        onChange={(e) => setShowHeatmap(e.target.checked)}
-                        className="h-3.5 w-3.5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
-                      />
-                      <span>Show density heatmap</span>
-                    </label>
                   </div>
                 </div>
-                <div className="flex flex-1 min-h-0 flex-col gap-3">
-                  <div
-                    ref={mapContainerRef}
-                    className="relative flex-1 overflow-hidden rounded-2xl bg-gradient-to-br from-emerald-50/70 via-sky-50 to-white"
-                    style={{ minHeight: mapAvailableHeight }}
-                  >
-                    <MapToast toasts={banners.mapQueue} onDismiss={banners.dismiss} />
-                    <div className="flex h-full w-full items-start justify-center">
-                      <div className="relative" style={{ width: displaySize, height: displaySize }}>
-                        <div className="absolute inset-0">
-                          {Array.from({ length: paddedGrid }).map((_, y) => (
-                            <div key={y} className="flex">
+                <div className="flex-1 min-h-0 px-4 py-4">
+                  <div className="flex h-full w-full items-center justify-center">
+                    <div
+                      className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-emerald-50/70 via-sky-50 to-white"
+                      style={{ width: mapSquarePx, height: mapSquarePx }}
+                    >
+                      <MapToast toasts={banners.mapQueue} onDismiss={banners.dismiss} />
+                      <div className="flex h-full w-full items-start justify-center">
+                        <div className="relative" style={{ width: displaySize, height: displaySize }}>
+                          <div className="absolute inset-0">
+                            {Array.from({ length: paddedGrid }).map((_, y) => (
+                              <div key={y} className="flex">
                               {Array.from({ length: paddedGrid }).map((__, x) => {
                                 const gridX = x - visualPadding;
                                 const gridY = y - visualPadding;
@@ -1264,8 +1256,22 @@
                       </div>
                     </div>
                   </div>
+                </div>
+                <div ref={mapFooterRef} className="border-t border-emerald-100/70 bg-white/70 px-4 py-3 text-xs text-slate-600">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <span className="text-[11px]">Click to add stops · Shift-click to remove · Pause to edit.</span>
+                    <label className="inline-flex items-center gap-2 text-xs font-medium text-slate-600">
+                      <input
+                        type="checkbox"
+                        checked={showHeatmap}
+                        onChange={(e) => setShowHeatmap(e.target.checked)}
+                        className="h-3.5 w-3.5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                      />
+                      <span>Show density heatmap</span>
+                    </label>
+                  </div>
                   {routeSummaries.length > 0 && (
-                    <div ref={mapFooterRef} className="lg:hidden">
+                    <div className="mt-3 space-y-2 lg:hidden">
                       <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Route Legend</div>
                       <div className="mt-2 max-h-28 space-y-2 overflow-auto pr-1">
                         {routeSummaries.map(summary => (
