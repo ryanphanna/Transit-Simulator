@@ -1348,7 +1348,7 @@
 
   // Render
   return (
-    <React.Fragment>
+    <>
       <div className="relative min-h-screen w-full bg-gradient-to-b from-sky-50 via-emerald-50/40 to-white text-slate-900">
           {banners.hudView}
           <header id="topbar" ref={topBarRef} className="sticky top-0 z-40 border-b border-emerald-100/60 bg-white/80 backdrop-blur">
@@ -1470,30 +1470,49 @@
               </div>
             </div>
           </main>
+        </div>
 
-          {settingsOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4">
-            <div className="w-full max-w-sm rounded-2xl border border-emerald-100/60 bg-white/85 p-6 shadow-xl">
-              <div className="flex items-center justify-between">
-                <h2 className="text-lg font-semibold text-slate-900">Settings</h2>
-                <button onClick={()=> setSettingsOpen(false)} className="rounded-md border border-emerald-100/60 bg-white/80 px-2 py-1 text-sm text-slate-600 hover:bg-emerald-50/40">✕</button>
-              </div>
-              <div className="mt-4 space-y-5 text-sm text-slate-700">
-                <label className="flex items-center justify-between gap-3">
-                  <span className="font-medium text-slate-800">Auto-skip idle minutes</span>
-                  <input type="checkbox" checked={autoSkipIdle} onChange={e=> setAutoSkipIdle(e.target.checked)} className="h-4 w-4 rounded border border-emerald-200" />
-                </label>
-              </div>
+      {settingsOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4" role="dialog" aria-modal="true">
+          <div className="w-full max-w-lg rounded-xl bg-white shadow-xl">
+            <div className="flex items-center justify-between border-b px-4 py-3">
+              <h3 className="font-semibold">Settings</h3>
+              <button
+                type="button"
+                className="rounded-md px-2 py-1 text-slate-600 hover:bg-slate-100"
+                onClick={() => setSettingsOpen(false)}
+                aria-label="Close settings"
+              >
+                ✕
+              </button>
+            </div>
 
-              <div className="mt-6 flex justify-end">
-                <button onClick={()=> setSettingsOpen(false)} className="rounded-lg border border-emerald-200 bg-white/80 px-3 py-1.5 text-sm font-medium hover:bg-emerald-50/40">Close</button>
-              </div>
+            <div className="space-y-4 px-4 py-4">
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={autoSkipIdle}
+                  onChange={(e) => setAutoSkipIdle(e.target.checked)}
+                />
+                <span>Auto-skip idle minutes</span>
+              </label>
+              {/* add more settings here if needed */}
+            </div>
+
+            <div className="flex justify-end gap-2 border-t px-4 py-3">
+              <button
+                type="button"
+                className="rounded-md bg-slate-100 px-3 py-1.5 hover:bg-slate-200"
+                onClick={() => setSettingsOpen(false)}
+              >
+                Done
+              </button>
             </div>
           </div>
-        )}
         </div>
-    </React.Fragment>
-  );
+      )}
+    </>
+  ); // close return
   }
   TS.App = App;
 
