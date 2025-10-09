@@ -1004,6 +1004,348 @@
     }, [withinService, banners]);
 
 
+    const leftPanel = (
+      <React.Fragment>
+        <div className="flex items-center justify-between rounded-xl bg-white/70 px-3 py-2 text-xs font-semibold text-slate-600">
+          <span>{simpleHud ? 'Simple view' : 'Detailed view'}</span>
+          <div className="inline-flex overflow-hidden rounded-lg border border-emerald-100/80 bg-white/60 text-[11px] font-medium">
+            <button
+              type="button"
+              onClick={() => setSimpleHud(true)}
+              aria-pressed={simpleHud}
+              className={`px-3 py-1 transition-colors ${simpleHud ? 'bg-emerald-100 text-emerald-700' : 'text-slate-500 hover:bg-emerald-50/40 hover:text-slate-700'}`}
+            >
+              Simple view
+            </button>
+            <button
+              type="button"
+              onClick={() => setSimpleHud(false)}
+              aria-pressed={!simpleHud}
+              className={`px-3 py-1 transition-colors ${!simpleHud ? 'bg-emerald-100 text-emerald-700' : 'text-slate-500 hover:bg-emerald-50/40 hover:text-slate-700'}`}
+            >
+              Detailed view
+            </button>
+          </div>
+        </div>
+        <div className="mt-3">
+          <div className="text-xs uppercase text-slate-500">Cash</div>
+          <div className={`text-3xl font-semibold ${cash<0?'text-rose-600':'text-emerald-600'}`}>{fmtMoney(cash)}</div>
+        </div>
+        <div className="mt-3 flex-1 pr-1">
+          {simpleHud ? simpleHudContent : detailedHudContent}
+        </div>
+      </React.Fragment>
+    );
+
+    const mapHeader = (
+      <div className="flex flex-col gap-3 bg-white/70">
+        <div className="text-center">
+          <h1 className="text-2xl font-semibold tracking-tight text-emerald-800">Transit Simulator</h1>
+          <p className="text-sm text-slate-600">Tutorial City · Population {population.toLocaleString()} · Goal: {MODE_SHARE_TARGET}% for {MODE_SHARE_STREAK_DAYS} days</p>
+          <p className="text-sm text-slate-700">
+            Network grade: <span className="font-semibold text-emerald-700">{networkGrade ?? '—'}</span> · Citizens appreciate every comfy ride.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+            <span className="inline-flex h-3 w-3 rounded-full" style={{ backgroundColor: activeRouteSummary?.color || '#0ea5e9' }} />
+            <span>{activeRoute?.name || 'Route'}</span>
+          </div>
+          <div className="flex items-center gap-3 text-xs text-slate-600">
+            <span>{activeRouteDailyRiders !== null ? `${Math.round(activeRouteDailyRiders).toLocaleString()} riders/day` : 'Add stops to peek at riders'}</span>
+            <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-emerald-100/80 text-[11px] font-bold text-emerald-700">{activeRouteSummary?.grade ?? '–'}</span>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-slate-600">
+          <span className={`font-semibold ${activeThrottled ? 'text-amber-600' : 'text-slate-700'}`}>
+            {activeActualVPH.toFixed(1)} / <span className={activeThrottled ? 'text-slate-400' : 'text-slate-500'}>{activeTargetVPH.toFixed(1)}</span> veh/hr
+          </span>
+          <span>Round trip {activeRoundTripMinutes ? `${activeRoundTripMinutes} min` : '—'}</span>
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-slate-600">
+          <span className="text-[11px]">Click to add stops · Shift-click to remove · Pause to edit.</span>
+          <label className="inline-flex items-center gap-2 text-xs font-medium text-slate-600">
+            <input
+              type="checkbox"
+              checked={showHeatmap}
+              onChange={(e) => setShowHeatmap(e.target.checked)}
+              className="h-3.5 w-3.5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+            />
+            <span>Show density heatmap</span>
+          </label>
+        </div>
+        {routeSummaries.length > 0 && (
+          <div className="space-y-2 lg:hidden">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Route Legend</div>
+            <div className="max-h-28 space-y-2 overflow-auto pr-1">
+              {routeSummaries.map(summary => (
+                <div
+                  key={summary.id}
+                  className="flex items-center justify-between gap-3 rounded-xl border border-emerald-100/70 bg-white/80 px-3 py-2 text-xs text-slate-600"
+                >
+                  <span className="flex items-center gap-2">
+                    <span className="inline-flex h-2.5 w-2.5 rounded-full" style={{ backgroundColor: summary.color }} />
+                    <span className="font-medium text-slate-700">{summary.name}</span>
+                  </span>
+                  <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-emerald-100/80 text-[11px] font-semibold text-emerald-700">{summary.grade ?? '–'}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+
+    const mapContent = (
+      <div className="flex h-full w-full flex-col">
+        <div className="flex-1 px-4 py-4">
+          <div
+            key={canvasTick}
+            className="relative h-full w-full overflow-hidden rounded-2xl bg-gradient-to-br from-emerald-50/70 via-sky-50 to-white"
+          >
+            <MapToast toasts={banners.mapQueue} onDismiss={banners.dismiss} />
+            <div className="flex h-full w-full items-start justify-center">
+              <div className="relative" style={{ width: displaySize, height: displaySize }}>
+                <div className="absolute inset-0">
+                  {Array.from({ length: paddedGrid }).map((_, y) => (
+                    <div key={y} className="flex">
+                    {Array.from({ length: paddedGrid }).map((__, x) => {
+                      const gridX = x - visualPadding;
+                      const gridY = y - visualPadding;
+                      const isRealCell = gridX >= 0 && gridX < GRID && gridY >= 0 && gridY < GRID;
+                      const key = `${gridX},${gridY}`;
+                      const popVal = isRealCell ? land.pop[gridY][gridX] : 0;
+                      const jobsVal = isRealCell ? land.jobs[gridY][gridX] : 0;
+                      const poi = isRealCell ? poiMap.get(key) : null;
+                      const densityLevel = isRealCell ? (densityLevels[gridY]?.[gridX] ?? 0) : 0;
+                      const baseIdx = Math.min(TILE_BASE_COLORS.length - 1, Math.max(0, popVal));
+                      const baseColor = TILE_BASE_COLORS[baseIdx] || TILE_BASE_COLORS[0];
+                      const shouldTint = showHeatmap && isRealCell;
+                      const tinted = shouldTint ? mixHexColor(baseColor, TILE_DENSITY_TINT, densityLevel * 0.8) : baseColor;
+                      const bg = isRealCell ? tinted : '#f6faf9';
+                      const outline = isRealCell
+                        ? (jobsVal>0 ? `1px solid ${JOB_OUTLINE_COLOR}` : `1px solid ${IDLE_OUTLINE_COLOR}`)
+                        : '1px solid rgba(148,163,184,0.25)';
+                      const glow = shouldTint && densityLevel > 0.05 ? `inset 0 0 0 1.5px rgba(58,174,161,${Math.min(0.35, densityLevel)})` : 'none';
+                      const sparkleOpacity = shouldTint && densityLevel > 0.25 ? Math.min(0.45, densityLevel) : 0;
+                      const house = isRealCell ? houseCells.get(key) : null;
+                      return (
+                        <div
+                          key={`${x}-${y}`}
+                          onClick={isRealCell ? (e)=> handleCellClick(e, gridX, gridY) : undefined}
+                          style={{ width: cellSize, height: cellSize, backgroundColor:bg, outline, boxShadow: glow, cursor: isRealCell ? 'crosshair' : 'default', position:'relative', overflow:'hidden', borderRadius:4 }}
+                        >
+                          {sparkleOpacity>0 && (
+                            <div className="tile-sparkle pointer-events-none absolute inset-1 rounded-md bg-emerald-200/40" style={{ opacity: sparkleOpacity }} />
+                          )}
+                          {house && (
+                            <div className="pointer-events-none absolute inset-0 grid place-items-center text-emerald-600" aria-hidden="true" style={{ fontSize: `${house.size}px` }}>
+                              🏠
+                            </div>
+                          )}
+                          {poi && <div style={{position:'absolute', inset:'0', display:'grid', placeItems:'center', fontSize:'12px'}}>{poiIcon(poi)}</div>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ))}
+              </div>
+              <svg
+                className="absolute inset-0 h-full w-full"
+                width={displaySize}
+                height={displaySize}
+                viewBox={`0 0 ${displaySize} ${displaySize}`}
+                preserveAspectRatio="none"
+                style={{ pointerEvents:'none' }}
+              >
+                {routeSummaries.map(summary => (
+                  summary.polyline && (
+                    <polyline
+                      key={summary.id}
+                      points={summary.polyline}
+                      fill="none"
+                      stroke={summary.color}
+                      strokeWidth={summary.id === activeRouteId ? 4 : 2}
+                      strokeLinejoin="round"
+                      strokeLinecap="round"
+                      strokeOpacity={summary.id === activeRouteId ? 1 : 0.45}
+                    />
+                  )
+                ))}
+              </svg>
+              {busVisible && busPosition && (
+                <div
+                  className="pointer-events-none absolute z-30"
+                  style={{ left: busPosition.x, top: busPosition.y, transform: `translate(-50%, -50%) rotate(${busPosition.angle}rad)` }}
+                >
+                  <span className="bus-emoji inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/85 text-lg shadow-lg ring-1 ring-emerald-200/80">
+                    🚌
+                  </span>
+                </div>
+              )}
+              {routeSummaries.map(summary => (
+                summary.stops.map((point, idx) => (
+                  <div
+                    key={`${summary.id}-${idx}`}
+                    className="absolute -translate-x-1/2 -translate-y-1/2"
+                    style={{ left: point.x * cellSize + mapOffset + cellSize/2, top: point.y * cellSize + mapOffset + cellSize/2 }}
+                  >
+                    <div
+                      className={`rounded-full border-2 ${summary.id === activeRouteId ? 'h-3.5 w-3.5' : 'h-2.5 w-2.5 opacity-80'}`}
+                      style={{ borderColor: summary.color, backgroundColor: summary.id === activeRouteId ? summary.color : '#fff' }}
+                    />
+                  </div>
+                ))
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+
+    const rightPanel = (
+      <React.Fragment>
+        <div>
+          <div className="flex items-center justify-between">
+            <div className="text-sm font-medium text-slate-900">Routes</div>
+            <button onClick={handleAddRoute} className="rounded-lg border border-emerald-200 bg-white/80 px-2 py-1 text-xs font-medium hover:bg-emerald-50/40">New Route</button>
+          </div>
+          <div className="mt-3 space-y-2">
+            {routeSummaries.map(summary => {
+              const isActive = summary.id === activeRouteId;
+              const throttled = summary.throttled;
+              return (
+                <button
+                  key={summary.id}
+                  onClick={()=> { destHeavyShownRef.current = false; setActiveRouteId(summary.id); }}
+                  className={`w-full rounded-xl border px-3 py-2 text-left text-sm ${isActive ? 'border-emerald-300 bg-emerald-100 text-emerald-900' : 'border-emerald-100/60 bg-white/80 text-slate-700 hover:bg-emerald-50/40'}`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="flex items-center gap-2">
+                      <span className="inline-flex h-2.5 w-2.5 rounded-full" style={{ backgroundColor: summary.color }} />
+                      <span className="font-medium">{summary.name}</span>
+                    </span>
+                    <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-emerald-100/80 text-[11px] font-bold text-emerald-700">{summary.grade ?? '–'}</span>
+                  </div>
+                  <div className="mt-1 flex items-center justify-between text-xs text-slate-600">
+                    <span>{summary.ridersPerDay !== null ? `${summary.ridersPerDay.toLocaleString()} riders/day` : 'No service yet'}</span>
+                    <span
+                      className={`font-semibold ${throttled ? 'text-amber-600' : 'text-slate-700'}`}
+                      title={throttled ? 'Limited by fleet/drivers/depot.' : undefined}
+                      aria-label={throttled ? 'Actual service limited by fleet, drivers, or depot capacity.' : undefined}
+                    >
+                      {summary.actualVPH.toFixed(1)} / <span className={throttled ? 'text-slate-400' : 'text-slate-500'}>{summary.targetVPH.toFixed(1)}</span> veh/hr
+                    </span>
+                  </div>
+                </button>
+              );
+            })}
+            {!routeSummaries.length && (
+              <div className="rounded-xl border border-dashed border-emerald-200 bg-white/80 px-3 py-4 text-center text-xs text-slate-500">Create a route to begin service.</div>
+            )}
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-emerald-100/60 bg-white/80 p-4 text-xs text-slate-700 shadow-sm">
+          <div className="text-sm font-medium text-slate-900">Selected Route</div>
+          <div className="mt-2 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="flex items-center gap-1">Actual / Target<InfoTip text="Actual is capped by fleet, drivers, and depot." /></span>
+              <span
+                className={`font-semibold ${activeThrottled ? 'text-amber-600' : 'text-slate-900'}`}
+                title={activeThrottled ? 'Limited by fleet/drivers/depot.' : undefined}
+                aria-label={activeThrottled ? 'Actual service limited by fleet, drivers, or depot capacity.' : undefined}
+              >
+                {activeActualVPH.toFixed(1)} / <span className={activeThrottled ? 'text-slate-400' : 'text-slate-500'}>{activeTargetVPH.toFixed(1)}</span> veh/hr
+              </span>
+            </div>
+            <div>
+              <div className="text-sm font-medium text-slate-900">Target Frequency</div>
+              <div className="mt-2">
+                <NumberStepper
+                  value={activeRoute?.targetVPH ?? DEFAULT_TARGET_VPH}
+                  min={0}
+                  max={24}
+                  step={1}
+                  onChange={handleRouteTargetChange}
+                  format={(v)=> `${Math.round(v)} veh/hr`}
+                />
+              </div>
+            </div>
+            <div className="flex items-center justify-between">
+              <span>Estimated riders/day</span>
+              <span className="font-semibold text-slate-900">{activeRouteDailyRiders !== null ? Math.round(activeRouteDailyRiders).toLocaleString() : '—'}</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-emerald-100/60 bg-white/80 p-4 text-xs text-slate-700 shadow-sm">
+          <div className="text-sm font-medium text-slate-900">Fare & Policy</div>
+          <div className="mt-3 space-y-2">
+            <div className="flex items-center justify-between text-sm font-medium text-slate-700">
+              <span>Global Fare</span>
+              <span className="font-semibold text-emerald-600">{fareLabel}</span>
+            </div>
+            <NumberStepper
+              value={globalFare}
+              min={1.5}
+              max={3.0}
+              step={0.05}
+              onChange={setGlobalFare}
+              showValueLabel={false}
+            />
+            <div className="text-xs text-slate-500">Range: $1.50 – $3.00</div>
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-emerald-100/60 bg-white/80 p-4 text-xs text-slate-700 shadow-sm">
+          <div className="text-sm font-medium text-slate-900">Service Hours</div>
+          <div className="mt-3 grid grid-cols-2 gap-3">
+            <label>Start: <input type="number" min="0" max="23" value={serviceStartHour} onChange={e=> setServiceStartHour(clamp(parseInt(e.target.value)||0,0,23))} className="ml-1 w-16 rounded border border-emerald-200 px-1" />:00</label>
+            <label>End: <input type="number" min="1" max="24" value={serviceEndHour} onChange={e=> setServiceEndHour(clamp(parseInt(e.target.value)||0,1,24))} className="ml-1 w-16 rounded border border-emerald-200 px-1" />:00</label>
+          </div>
+          <div className="mt-1 text-xs text-slate-500">Current span: {Math.max(0, serviceEndHour - serviceStartHour)} hours/day</div>
+        </div>
+
+        <div className="rounded-2xl border border-emerald-100/60 bg-white/80 p-4 text-xs text-slate-700 shadow-sm">
+          <div className="mb-2 text-sm font-medium text-slate-900">Fleet & Depot</div>
+          <div className="space-y-1 text-sm text-slate-700">
+            <div>Buses owned: <span className="font-semibold text-slate-900">{fleet}</span></div>
+            <div>Vehicles in use: <span className="font-semibold text-slate-900">{vehiclesInUse}</span> / {fleet} buses (Spare: {spareBuses})</div>
+            <div>Depot capacity: <span className="font-semibold text-slate-900">{depotCap}</span></div>
+            <div>Max throughput: <span className="font-semibold text-slate-900">{depotThroughputRounded}</span> veh/hr</div>
+          </div>
+          {allocationDeficit > 0 && (
+            <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-700">
+              Short by {allocationDeficit} buses to hit targets.
+            </div>
+          )}
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button onClick={()=> buyBuses(1)} className="rounded-lg border border-emerald-200 bg-white/80 px-2 py-1 text-xs hover:bg-emerald-50/40">Buy 1 ({FUELS[fuel].busCost.toLocaleString()})</button>
+            <button onClick={()=> buyBuses(5)} className="rounded-lg border border-emerald-200 bg-white/80 px-2 py-1 text-xs hover:bg-emerald-50/40">Buy 5 (−5%)</button>
+            <button onClick={()=> buyBuses(10)} className="rounded-lg border border-emerald-200 bg-white/80 px-2 py-1 text-xs hover:bg-emerald-50/40">Buy 10 (−10%)</button>
+            <button onClick={expandDepot} className="rounded-lg border border-emerald-200 bg-white/80 px-2 py-1 text-xs hover:bg-emerald-50/40">Expand Depot +{DEPOT_EXPANSION_STEP} ({DEPOT_EXPANSION_COST.toLocaleString()})</button>
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-emerald-100/60 bg-white/80 p-4 text-xs text-slate-700 shadow-sm">
+          <div className="mb-2 text-sm font-medium text-slate-900">Fuel & Drivers</div>
+          <div className="flex flex-wrap gap-2">
+            {Object.keys(FUELS).map(k=>(
+              <button key={k} onClick={()=> setFuel(k)} className={`rounded-lg border px-2 py-1 text-xs ${fuel===k?'border-emerald-300 bg-emerald-100':'border-emerald-200 bg-white/80 hover:bg-emerald-50/40'}`}>{k}</button>
+            ))}
+          </div>
+          <div className="mt-2 text-sm">$ / km: <span className="font-semibold text-slate-900">{FUELS[fuel].costPerKm.toFixed(2)}</span></div>
+          <div className="mt-1 text-sm">
+            Drivers: <span className="font-semibold text-slate-900">{drivers}</span>
+            <button onClick={()=> hireDrivers(+10)} className="ml-2 rounded border border-emerald-200 bg-white/80 px-2 py-0.5 text-xs hover:bg-emerald-50/40">+10</button>
+            <button onClick={()=> hireDrivers(-10)} className="ml-1 rounded border border-emerald-200 bg-white/80 px-2 py-0.5 text-xs hover:bg-emerald-50/40">−10</button>
+          </div>
+        </div>
+      </React.Fragment>
+    );
+
+
   // Render
   return (
     <React.Fragment>
@@ -1071,362 +1413,60 @@
 
 
 
-          <main
-            id="app-viewport"
-            className="mx-auto w-full max-w-screen-2xl px-6 pb-6 pt-6 md:px-10 lg:px-14"
-          >
-            <div id="app-grid" className="h-[calc(100vh-var(--topbar-h,64px))] overflow-hidden">
-              <div className="grid h-full grid-cols-1 gap-6 lg:grid-cols-[360px_minmax(560px,1fr)_360px]">
-                <aside
-                  id="left-col"
-                  className="order-2 flex h-full min-h-0 flex-col overflow-auto rounded-2xl border border-emerald-100/60 bg-white/85 p-4 shadow-sm lg:order-1"
-                  aria-label="Network overview panel"
-                >
-                  <div className="flex items-center justify-between rounded-xl bg-white/70 px-3 py-2 text-xs font-semibold text-slate-600">
-                    <span>{simpleHud ? 'Simple view' : 'Detailed view'}</span>
-                    <div className="inline-flex overflow-hidden rounded-lg border border-emerald-100/80 bg-white/60 text-[11px] font-medium">
-                      <button
-                        type="button"
-                        onClick={() => setSimpleHud(true)}
-                        aria-pressed={simpleHud}
-                        className={`px-3 py-1 transition-colors ${simpleHud ? 'bg-emerald-100 text-emerald-700' : 'text-slate-500 hover:bg-emerald-50/40 hover:text-slate-700'}`}
-                      >
-                        Simple view
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setSimpleHud(false)}
-                        aria-pressed={!simpleHud}
-                        className={`px-3 py-1 transition-colors ${!simpleHud ? 'bg-emerald-100 text-emerald-700' : 'text-slate-500 hover:bg-emerald-50/40 hover:text-slate-700'}`}
-                      >
-                        Detailed view
-                      </button>
-                    </div>
-                  </div>
-                  <div className="mt-3">
-                    <div className="text-xs uppercase text-slate-500">Cash</div>
-                    <div className={`text-3xl font-semibold ${cash<0?'text-rose-600':'text-emerald-600'}`}>{fmtMoney(cash)}</div>
-                  </div>
-                  <div className="mt-3 flex-1 pr-1">
-                    {simpleHud ? simpleHudContent : detailedHudContent}
-                  </div>
-                </aside>
+          <main id="app-main" className="relative">
+            {/* Viewport container and grid */}
+            <div id="app-viewport" className="mx-auto max-w-screen-2xl px-6 md:px-10 lg:px-14">
+              <div id="app-grid" className="h-[calc(100vh-var(--topbar-h,64px))] overflow-hidden">
                 <div
-                  id="center-col"
-                  className="order-2 h-full min-h-0 overflow-hidden rounded-2xl border border-emerald-100/60 bg-white/85 shadow-sm lg:order-2"
-                  aria-label="Active route map and details"
+                  className="grid h-full gap-6
+                   grid-cols-1
+                   lg:grid-cols-[360px_minmax(560px,1fr)_360px]"
                 >
-                  <div ref={centerColRef} className="h-full">
+                  {/* LEFT: Stats (display-only) */}
+                  <aside
+                    id="left-col"
+                    className="order-2 h-full min-h-0 overflow-auto rounded-2xl border border-emerald-100/60 bg-white/85 p-4 shadow-sm lg:order-1"
+                  >
+                    {/* LEFT PANEL CONTENT START */}
+                    {leftPanel}
+                    {/* LEFT PANEL CONTENT END */}
+                  </aside>
+
+                  {/* CENTER: Map card (flex column) */}
+                  <section
+                    id="center-col"
+                    className="order-1 h-full min-h-0 overflow-hidden rounded-2xl border border-emerald-100/60 bg-white/85 shadow-sm lg:order-2"
+                  >
                     <div className="flex h-full flex-col">
-                      <div className="shrink-0 border-b border-emerald-100/70 bg-white/70 px-4 py-3">
-                        <div className="flex flex-col gap-3">
-                          <div className="text-center">
-                            <h1 className="text-2xl font-semibold tracking-tight text-emerald-800">Transit Simulator</h1>
-                            <p className="text-sm text-slate-600">Tutorial City · Population {population.toLocaleString()} · Goal: {MODE_SHARE_TARGET}% for {MODE_SHARE_STREAK_DAYS} days</p>
-                            <p className="text-sm text-slate-700">
-                              Network grade: <span className="font-semibold text-emerald-700">{networkGrade ?? '—'}</span> · Citizens appreciate every comfy ride.
-                            </p>
-                          </div>
-                          <div className="flex flex-wrap items-center justify-between gap-3">
-                            <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                              <span className="inline-flex h-3 w-3 rounded-full" style={{ backgroundColor: activeRouteSummary?.color || '#0ea5e9' }} />
-                              <span>{activeRoute?.name || 'Route'}</span>
-                            </div>
-                            <div className="flex items-center gap-3 text-xs text-slate-600">
-                              <span>{activeRouteDailyRiders !== null ? `${Math.round(activeRouteDailyRiders).toLocaleString()} riders/day` : 'Add stops to peek at riders'}</span>
-                              <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-emerald-100/80 text-[11px] font-bold text-emerald-700">{activeRouteSummary?.grade ?? '–'}</span>
-                            </div>
-                          </div>
-                          <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-slate-600">
-                            <span className={`font-semibold ${activeThrottled ? 'text-amber-600' : 'text-slate-700'}`}>
-                              {activeActualVPH.toFixed(1)} / <span className={activeThrottled ? 'text-slate-400' : 'text-slate-500'}>{activeTargetVPH.toFixed(1)}</span> veh/hr
-                            </span>
-                            <span>Round trip {activeRoundTripMinutes ? `${activeRoundTripMinutes} min` : '—'}</span>
-                          </div>
+                      {/* Map header */}
+                      <div className="shrink-0 border-b px-4 py-3">
+                        {mapHeader}
+                      </div>
+
+                      {/* Map area (square centered) */}
+                      <div ref={mapAreaRef} className="flex-1 overflow-hidden grid place-content-center">
+                        <div style={{ width: TS.CANVAS_SIZE, height: TS.CANVAS_SIZE }}>
+                          {mapContent}
                         </div>
                       </div>
-                      <div ref={mapAreaRef} className="flex-1 overflow-hidden grid place-content-center px-4 py-4">
-                        <div
-                          key={canvasTick}
-                          className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-emerald-50/70 via-sky-50 to-white"
-                          style={{ width: canvasSize, height: canvasSize }}
-                        >
-                          <MapToast toasts={banners.mapQueue} onDismiss={banners.dismiss} />
-                          <div className="flex h-full w-full items-start justify-center">
-                            <div className="relative" style={{ width: displaySize, height: displaySize }}>
-                              <div className="absolute inset-0">
-                                {Array.from({ length: paddedGrid }).map((_, y) => (
-                                  <div key={y} className="flex">
-                                  {Array.from({ length: paddedGrid }).map((__, x) => {
-                                    const gridX = x - visualPadding;
-                                    const gridY = y - visualPadding;
-                                    const isRealCell = gridX >= 0 && gridX < GRID && gridY >= 0 && gridY < GRID;
-                                    const key = `${gridX},${gridY}`;
-                                    const popVal = isRealCell ? land.pop[gridY][gridX] : 0;
-                                    const jobsVal = isRealCell ? land.jobs[gridY][gridX] : 0;
-                                    const poi = isRealCell ? poiMap.get(key) : null;
-                                    const densityLevel = isRealCell ? (densityLevels[gridY]?.[gridX] ?? 0) : 0;
-                                    const baseIdx = Math.min(TILE_BASE_COLORS.length - 1, Math.max(0, popVal));
-                                    const baseColor = TILE_BASE_COLORS[baseIdx] || TILE_BASE_COLORS[0];
-                                    const shouldTint = showHeatmap && isRealCell;
-                                    const tinted = shouldTint ? mixHexColor(baseColor, TILE_DENSITY_TINT, densityLevel * 0.8) : baseColor;
-                                    const bg = isRealCell ? tinted : '#f6faf9';
-                                    const outline = isRealCell
-                                      ? (jobsVal>0 ? `1px solid ${JOB_OUTLINE_COLOR}` : `1px solid ${IDLE_OUTLINE_COLOR}`)
-                                      : '1px solid rgba(148,163,184,0.25)';
-                                    const glow = shouldTint && densityLevel > 0.05 ? `inset 0 0 0 1.5px rgba(58,174,161,${Math.min(0.35, densityLevel)})` : 'none';
-                                    const sparkleOpacity = shouldTint && densityLevel > 0.25 ? Math.min(0.45, densityLevel) : 0;
-                                    const house = isRealCell ? houseCells.get(key) : null;
-                                    return (
-                                      <div
-                                        key={`${x}-${y}`}
-                                        onClick={isRealCell ? (e)=> handleCellClick(e, gridX, gridY) : undefined}
-                                        style={{ width: cellSize, height: cellSize, backgroundColor:bg, outline, boxShadow: glow, cursor: isRealCell ? 'crosshair' : 'default', position:'relative', overflow:'hidden', borderRadius:4 }}
-                                      >
-                                        {sparkleOpacity>0 && (
-                                          <div className="tile-sparkle pointer-events-none absolute inset-1 rounded-md bg-emerald-200/40" style={{ opacity: sparkleOpacity }} />
-                                        )}
-                                        {house && (
-                                          <div className="pointer-events-none absolute inset-0 grid place-items-center text-emerald-600" aria-hidden="true" style={{ fontSize: `${house.size}px` }}>
-                                            🏠
-                                          </div>
-                                        )}
-                                        {poi && <div style={{position:'absolute', inset:'0', display:'grid', placeItems:'center', fontSize:'12px'}}>{poiIcon(poi)}</div>}
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              ))}
-                            </div>
-                            <svg
-                              className="absolute inset-0 h-full w-full"
-                              width={displaySize}
-                              height={displaySize}
-                              viewBox={`0 0 ${displaySize} ${displaySize}`}
-                              preserveAspectRatio="none"
-                              style={{ pointerEvents:'none' }}
-                            >
-                              {routeSummaries.map(summary => (
-                                summary.polyline && (
-                                  <polyline
-                                    key={summary.id}
-                                    points={summary.polyline}
-                                    fill="none"
-                                    stroke={summary.color}
-                                    strokeWidth={summary.id === activeRouteId ? 4 : 2}
-                                    strokeLinejoin="round"
-                                    strokeLinecap="round"
-                                    strokeOpacity={summary.id === activeRouteId ? 1 : 0.45}
-                                  />
-                                )
-                              ))}
-                            </svg>
-                            {busVisible && busPosition && (
-                              <div
-                                className="pointer-events-none absolute z-30"
-                                style={{ left: busPosition.x, top: busPosition.y, transform: `translate(-50%, -50%) rotate(${busPosition.angle}rad)` }}
-                              >
-                                <span className="bus-emoji inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/85 text-lg shadow-lg ring-1 ring-emerald-200/80">
-                                  🚌
-                                </span>
-                              </div>
-                            )}
-                            {routeSummaries.map(summary => (
-                              summary.stops.map((point, idx) => (
-                                <div
-                                  key={`${summary.id}-${idx}`}
-                                  className="absolute -translate-x-1/2 -translate-y-1/2"
-                                  style={{ left: point.x * cellSize + mapOffset + cellSize/2, top: point.y * cellSize + mapOffset + cellSize/2 }}
-                                >
-                                  <div
-                                    className={`rounded-full border-2 ${summary.id === activeRouteId ? 'h-3.5 w-3.5' : 'h-2.5 w-2.5 opacity-80'}`}
-                                    style={{ borderColor: summary.color, backgroundColor: summary.id === activeRouteId ? summary.color : '#fff' }}
-                                  />
-                                </div>
-                              ))
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-                      <div className="shrink-0 border-t border-emerald-100/70 bg-white/70 px-4 py-2 text-xs text-slate-600">
-                        <div className="flex flex-wrap items-center justify-between gap-3">
-                          <span className="text-[11px]">Click to add stops · Shift-click to remove · Pause to edit.</span>
-                          <label className="inline-flex items-center gap-2 text-xs font-medium text-slate-600">
-                            <input
-                              type="checkbox"
-                              checked={showHeatmap}
-                              onChange={(e) => setShowHeatmap(e.target.checked)}
-                              className="h-3.5 w-3.5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
-                            />
-                            <span>Show density heatmap</span>
-                          </label>
-                        </div>
-                        {routeSummaries.length > 0 && (
-                          <div className="mt-2 space-y-2 lg:hidden">
-                            <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Route Legend</div>
-                            <div className="mt-1 max-h-28 space-y-2 overflow-auto pr-1">
-                              {routeSummaries.map(summary => (
-                                <div
-                                  key={summary.id}
-                                  className="flex items-center justify-between gap-3 rounded-xl border border-emerald-100/70 bg-white/80 px-3 py-2 text-xs text-slate-600"
-                                >
-                                  <span className="flex items-center gap-2">
-                                    <span className="inline-flex h-2.5 w-2.5 rounded-full" style={{ backgroundColor: summary.color }} />
-                                    <span className="font-medium text-slate-700">{summary.name}</span>
-                                  </span>
-                                  <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-emerald-100/80 text-[11px] font-semibold text-emerald-700">{summary.grade ?? '–'}</span>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        )}
+
+                      {/* Map footer / help */}
+                      <div className="shrink-0 border-t px-4 py-2">
+                        Click to add stops · Shift-click to remove · Pause to edit.
                       </div>
                     </div>
-                  </div>
-                </div>
-                <aside
-                  id="right-col"
-                  className="order-3 flex h-full min-h-0 flex-col gap-4 overflow-auto rounded-2xl border border-emerald-100/60 bg-white/85 p-4 shadow-sm lg:order-3"
-                  aria-label="Route management panel"
-                >
-                <div>
-                  <div className="flex items-center justify-between">
-                    <div className="text-sm font-medium text-slate-900">Routes</div>
-                    <button onClick={handleAddRoute} className="rounded-lg border border-emerald-200 bg-white/80 px-2 py-1 text-xs font-medium hover:bg-emerald-50/40">New Route</button>
-                  </div>
-                  <div className="mt-3 space-y-2">
-                    {routeSummaries.map(summary => {
-                      const isActive = summary.id === activeRouteId;
-                      const throttled = summary.throttled;
-                      return (
-                        <button
-                          key={summary.id}
-                          onClick={()=> { destHeavyShownRef.current = false; setActiveRouteId(summary.id); }}
-                          className={`w-full rounded-xl border px-3 py-2 text-left text-sm ${isActive ? 'border-emerald-300 bg-emerald-100 text-emerald-900' : 'border-emerald-100/60 bg-white/80 text-slate-700 hover:bg-emerald-50/40'}`}
-                        >
-                          <div className="flex items-center justify-between">
-                            <span className="flex items-center gap-2">
-                              <span className="inline-flex h-2.5 w-2.5 rounded-full" style={{ backgroundColor: summary.color }} />
-                              <span className="font-medium">{summary.name}</span>
-                            </span>
-                            <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-emerald-100/80 text-[11px] font-bold text-emerald-700">{summary.grade ?? '–'}</span>
-                          </div>
-                          <div className="mt-1 flex items-center justify-between text-xs text-slate-600">
-                            <span>{summary.ridersPerDay !== null ? `${summary.ridersPerDay.toLocaleString()} riders/day` : 'No service yet'}</span>
-                            <span
-                              className={`font-semibold ${throttled ? 'text-amber-600' : 'text-slate-700'}`}
-                              title={throttled ? 'Limited by fleet/drivers/depot.' : undefined}
-                              aria-label={throttled ? 'Actual service limited by fleet, drivers, or depot capacity.' : undefined}
-                            >
-                              {summary.actualVPH.toFixed(1)} / <span className={throttled ? 'text-slate-400' : 'text-slate-500'}>{summary.targetVPH.toFixed(1)}</span> veh/hr
-                            </span>
-                          </div>
-                        </button>
-                      );
-                    })}
-                    {!routeSummaries.length && (
-                      <div className="rounded-xl border border-dashed border-emerald-200 bg-white/80 px-3 py-4 text-center text-xs text-slate-500">Create a route to begin service.</div>
-                    )}
-                  </div>
-                </div>
+                  </section>
 
-                <div className="rounded-2xl border border-emerald-100/60 bg-white/80 p-4 text-xs text-slate-700 shadow-sm">
-                  <div className="text-sm font-medium text-slate-900">Selected Route</div>
-                  <div className="mt-2 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="flex items-center gap-1">Actual / Target<InfoTip text="Actual is capped by fleet, drivers, and depot." /></span>
-                      <span
-                        className={`font-semibold ${activeThrottled ? 'text-amber-600' : 'text-slate-900'}`}
-                        title={activeThrottled ? 'Limited by fleet/drivers/depot.' : undefined}
-                        aria-label={activeThrottled ? 'Actual service limited by fleet, drivers, or depot capacity.' : undefined}
-                      >
-                        {activeActualVPH.toFixed(1)} / <span className={activeThrottled ? 'text-slate-400' : 'text-slate-500'}>{activeTargetVPH.toFixed(1)}</span> veh/hr
-                      </span>
-                    </div>
-                    <div>
-                      <div className="text-sm font-medium text-slate-900">Target Frequency</div>
-                      <div className="mt-2">
-                        <NumberStepper
-                          value={activeRoute?.targetVPH ?? DEFAULT_TARGET_VPH}
-                          min={0}
-                          max={24}
-                          step={1}
-                          onChange={handleRouteTargetChange}
-                          format={(v)=> `${Math.round(v)} veh/hr`}
-                        />
-                      </div>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span>Estimated riders/day</span>
-                      <span className="font-semibold text-slate-900">{activeRouteDailyRiders !== null ? Math.round(activeRouteDailyRiders).toLocaleString() : '—'}</span>
-                    </div>
-                  </div>
+                  {/* RIGHT: Controls */}
+                  <aside
+                    id="right-col"
+                    className="order-3 h-full min-h-0 overflow-auto rounded-2xl border border-emerald-100/60 bg-white/85 p-4 shadow-sm lg:order-3 flex flex-col gap-4"
+                  >
+                    {/* RIGHT PANEL CONTENT START */}
+                    {rightPanel}
+                    {/* RIGHT PANEL CONTENT END */}
+                  </aside>
                 </div>
-
-                <div className="rounded-2xl border border-emerald-100/60 bg-white/80 p-4 text-xs text-slate-700 shadow-sm">
-                  <div className="text-sm font-medium text-slate-900">Fare & Policy</div>
-                  <div className="mt-3 space-y-2">
-                    <div className="flex items-center justify-between text-sm font-medium text-slate-700">
-                      <span>Global Fare</span>
-                      <span className="font-semibold text-emerald-600">{fareLabel}</span>
-                    </div>
-                    <NumberStepper
-                      value={globalFare}
-                      min={1.5}
-                      max={3.0}
-                      step={0.05}
-                      onChange={setGlobalFare}
-                      showValueLabel={false}
-                    />
-                    <div className="text-xs text-slate-500">Range: $1.50 – $3.00</div>
-                  </div>
-                </div>
-
-                <div className="rounded-2xl border border-emerald-100/60 bg-white/80 p-4 text-xs text-slate-700 shadow-sm">
-                  <div className="text-sm font-medium text-slate-900">Service Hours</div>
-                  <div className="mt-3 grid grid-cols-2 gap-3">
-                    <label>Start: <input type="number" min="0" max="23" value={serviceStartHour} onChange={e=> setServiceStartHour(clamp(parseInt(e.target.value)||0,0,23))} className="ml-1 w-16 rounded border border-emerald-200 px-1" />:00</label>
-                    <label>End: <input type="number" min="1" max="24" value={serviceEndHour} onChange={e=> setServiceEndHour(clamp(parseInt(e.target.value)||0,1,24))} className="ml-1 w-16 rounded border border-emerald-200 px-1" />:00</label>
-                  </div>
-                  <div className="mt-1 text-xs text-slate-500">Current span: {Math.max(0, serviceEndHour - serviceStartHour)} hours/day</div>
-                </div>
-
-                <div className="rounded-2xl border border-emerald-100/60 bg-white/80 p-4 text-xs text-slate-700 shadow-sm">
-                  <div className="mb-2 text-sm font-medium text-slate-900">Fleet & Depot</div>
-                  <div className="space-y-1 text-sm text-slate-700">
-                    <div>Buses owned: <span className="font-semibold text-slate-900">{fleet}</span></div>
-                    <div>Vehicles in use: <span className="font-semibold text-slate-900">{vehiclesInUse}</span> / {fleet} buses (Spare: {spareBuses})</div>
-                    <div>Depot capacity: <span className="font-semibold text-slate-900">{depotCap}</span></div>
-                    <div>Max throughput: <span className="font-semibold text-slate-900">{depotThroughputRounded}</span> veh/hr</div>
-                  </div>
-                  {allocationDeficit > 0 && (
-                    <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-700">
-                      Short by {allocationDeficit} buses to hit targets.
-                    </div>
-                  )}
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <button onClick={()=> buyBuses(1)} className="rounded-lg border border-emerald-200 bg-white/80 px-2 py-1 text-xs hover:bg-emerald-50/40">Buy 1 ({FUELS[fuel].busCost.toLocaleString()})</button>
-                    <button onClick={()=> buyBuses(5)} className="rounded-lg border border-emerald-200 bg-white/80 px-2 py-1 text-xs hover:bg-emerald-50/40">Buy 5 (−5%)</button>
-                    <button onClick={()=> buyBuses(10)} className="rounded-lg border border-emerald-200 bg-white/80 px-2 py-1 text-xs hover:bg-emerald-50/40">Buy 10 (−10%)</button>
-                    <button onClick={expandDepot} className="rounded-lg border border-emerald-200 bg-white/80 px-2 py-1 text-xs hover:bg-emerald-50/40">Expand Depot +{DEPOT_EXPANSION_STEP} ({DEPOT_EXPANSION_COST.toLocaleString()})</button>
-                  </div>
-                </div>
-
-                <div className="rounded-2xl border border-emerald-100/60 bg-white/80 p-4 text-xs text-slate-700 shadow-sm">
-                  <div className="mb-2 text-sm font-medium text-slate-900">Fuel & Drivers</div>
-                  <div className="flex flex-wrap gap-2">
-                    {Object.keys(FUELS).map(k=>(
-                      <button key={k} onClick={()=> setFuel(k)} className={`rounded-lg border px-2 py-1 text-xs ${fuel===k?'border-emerald-300 bg-emerald-100':'border-emerald-200 bg-white/80 hover:bg-emerald-50/40'}`}>{k}</button>
-                    ))}
-                  </div>
-                  <div className="mt-2 text-sm">$ / km: <span className="font-semibold text-slate-900">{FUELS[fuel].costPerKm.toFixed(2)}</span></div>
-                  <div className="mt-1 text-sm">
-                    Drivers: <span className="font-semibold text-slate-900">{drivers}</span>
-                    <button onClick={()=> hireDrivers(+10)} className="ml-2 rounded border border-emerald-200 bg-white/80 px-2 py-0.5 text-xs hover:bg-emerald-50/40">+10</button>
-                    <button onClick={()=> hireDrivers(-10)} className="ml-1 rounded border border-emerald-200 bg-white/80 px-2 py-0.5 text-xs hover:bg-emerald-50/40">−10</button>
-                  </div>
-                </div>
-                </aside>
               </div>
             </div>
           </main>
