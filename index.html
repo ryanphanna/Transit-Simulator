@@ -3,71 +3,124 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Transit Simulator</title>
-  <link rel="stylesheet" href="./css/tailwind.generated.css" />
-  <link rel="stylesheet" href="./css/styles.css" />
+  <title>Transit Simulator — Baseline</title>
+  <link rel="preconnect" href="https://unpkg.com">
+  <style>
+    :root{
+      --topbar-h: 64px;
+      --bezel-x: clamp(16px, 4vw, 56px);
+      --col-gap: 24px;
+      --left-w: 360px;
+      --right-w: 360px;
+      --card-bg: rgba(255,255,255,0.85);
+      --card-br: 14px;
+      --grid-border: #d9efe4;
+    }
+    html,body{height:100%;}
+    body{
+      margin:0;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial;
+      background: linear-gradient(180deg, #eef8f3, #f4fbf7);
+      color:#0f172a;
+    }
+    #topbar{
+      height: var(--topbar-h);
+      display:flex; align-items:center; justify-content:space-between;
+      padding: 0 var(--bezel-x);
+      gap:12px; border-bottom:1px solid #e8f3ee; background: #f7fcfa;
+      position: sticky; top:0; z-index: 10;
+    }
+    .btn{height:32px; padding:0 10px; border:1px solid #cae9df; border-radius:10px; background:#fff; cursor:pointer;}
+    #viewport{height: calc(100vh - var(--topbar-h)); padding: 16px var(--bezel-x); overflow: hidden;}
+    .grid3{display:grid; height:100%; gap: var(--col-gap); grid-template-columns: 1fr;}
+    @media (min-width: 1024px){.grid3{grid-template-columns: var(--left-w) minmax(560px, 1fr) var(--right-w);}}
+    .card{background: var(--card-bg); border: 1px solid #dff1ea; border-radius: var(--card-br); box-shadow: 0 2px 6px rgba(20,83,45,0.06);}
+    .col{min-height:0; height:100%;}
+    .col-scroll{overflow: auto;}
+    .col-center{overflow: hidden; display:flex;}
+    .center-card{display:flex; flex-direction:column; width:100%;}
+    .center-head,.center-foot{padding:12px 14px; border-bottom:1px solid #e9f4ef;}
+    .center-foot{border-top:1px solid #e9f4ef; border-bottom:0;}
+    .map-wrap{flex:1; display:grid; place-content:center; overflow:hidden;}
+    #mapSquare{background:#f6fbf9; border:1px solid #e3f2ec; border-radius:12px; position:relative;}
+    .gridLines{position:absolute; inset:0; background-image:linear-gradient(to right, var(--grid-border) 1px, transparent 1px),linear-gradient(to bottom, var(--grid-border) 1px, transparent 1px); background-size: 32px 32px; border-radius:12px; pointer-events:none;}
+    .tile{position:absolute; transform: translate(-50%,-50%); font-size:18px;}
+    .section{padding:14px; border-bottom:1px solid #e9f4ef;}
+    .section:last-child{border-bottom:0;}
+    .hstack{display:flex; align-items:center; gap:8px; flex-wrap:wrap;}
+    .stat{font-weight:700; color:#059669; font-size:28px;}
+    .muted{color:#64748b; font-size:13px;}
+  </style>
 </head>
-<body class="min-h-screen bg-gradient-to-b from-sky-50 via-emerald-50/40 to-white">
-  <div id="root"></div>
-
-  <!-- Error overlay so a crash isn't just a white screen -->
-  <div id="error-overlay" class="hidden fixed inset-0 bg-white/95 text-rose-700 p-6">
-    <div class="max-w-2xl mx-auto">
-      <div class="text-lg font-semibold">Something went wrong loading the app.</div>
-      <div id="err-msg" class="mt-2 whitespace-pre-wrap text-sm"></div>
+<body>
+  <header id="topbar">
+    <div class="hstack">
+      <div class="muted" id="clock">Day 1 · 06:00 — In service</div>
+      <button class="btn" id="play">▶ Play</button>
+      <button class="btn spd" data-x="1">1×</button>
+      <button class="btn spd" data-x="4">4×</button>
+      <button class="btn spd" data-x="10">10×</button>
+      <button class="btn" id="jump">⏭ Jump</button>
     </div>
-  </div>
+    <div class="hstack">
+      <div class="muted">Fare $2.00</div>
+      <button class="btn" id="settings">⚙ Settings</button>
+      <button class="btn" id="reset">⟲ Reset</button>
+      <button class="btn" id="newmap">🗺️ New Map</button>
+    </div>
+  </header>
+
+  <main id="viewport">
+    <div class="grid3">
+      <aside class="col col-scroll card" id="leftCol">
+        <div class="section"><div class="muted">Cash</div><div class="stat" id="cash">$5,000,000</div></div>
+        <div class="section"><div class="muted">Riders / hr</div><div id="rph">0</div></div>
+        <div class="section"><div class="muted">Vehicles in use</div><div id="veh">0 / 10 (Spare: 10)</div></div>
+        <div class="section"><div class="muted">Daily money</div><div id="money">$0 – $0 = $0</div></div>
+      </aside>
+
+      <section class="col col-center card" id="centerCol">
+        <div class="center-card">
+          <div class="center-head"><strong>Transit Simulator</strong><div class="muted">Tutorial City · Population 100,000 · Goal: 5% for 30 days</div></div>
+          <div class="map-wrap"><div id="mapSquare"><div class="gridLines"></div></div></div>
+          <div class="center-foot muted">Click to add stops (coming soon) · Shift-click to remove · Pause to edit.</div>
+        </div>
+      </section>
+
+      <aside class="col col-scroll card" id="rightCol">
+        <div class="section"><strong>Routes</strong><div class="muted">Route controls coming soon.</div></div>
+        <div class="section"><strong>Fare &amp; Policy</strong><div class="hstack"><button class="btn" id="fareMinus">–</button><div id="fare">$2.00</div><button class="btn" id="farePlus">+</button></div><div class="muted">Range: $1.50 – $3.00</div></div>
+        <div class="section"><strong>Service Hours</strong><div class="muted">Start 06:00 · End 22:00</div></div>
+      </aside>
+    </div>
+  </main>
+
   <script>
-    window.addEventListener('error', function (e) {
-      const o = document.getElementById('error-overlay');
-      const m = document.getElementById('err-msg');
-      const err = e && e.error;
-      const stack = err && err.stack;
-      const message = e && e.message;
-      o.classList.remove('hidden');
-      m.textContent = stack || message || 'Unknown error';
-    });
-    const TS = window.TS = window.TS || {};
-    TS.GRID = TS.GRID ?? null;
-    TS.clamp = TS.clamp ?? function () {};
-    TS.generateLandUse = TS.generateLandUse ?? function () { return {}; };
-    TS.generatePOIs = TS.generatePOIs ?? function () { return new Map(); };
-    TS.estimateRouteDemand = TS.estimateRouteDemand ?? function () { return {}; };
-    TS.useBanners = TS.useBanners ?? function () {
-      return { show: function () {}, dismiss: function () {}, hudView: null, mapQueue: [] };
-    };
-  </script>
-
-  <!-- React + Babel (CORS-friendly so errors show stack traces) -->
-  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin="anonymous"></script>
-  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin="anonymous"></script>
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js" crossorigin="anonymous"></script>
-
-  <!-- Game files: each is transpiled by Babel; no import/export anywhere -->
-  <script type="text/babel" data-presets="env"  src="./js/constants.js"></script>
-  <script type="text/babel" data-presets="env"  src="./js/utils.js"></script>
-  <script type="text/babel" data-presets="env"  src="./js/landuse.js"></script>
-  <script type="text/babel" data-presets="env"  src="./js/poi.js"></script>
-  <script type="text/babel" data-presets="env"  src="./js/sim.js"></script>
-  <script type="text/babel" data-presets="env,react" src="./js/ui.jsx"></script>
-  <script type="text/babel" data-presets="env,react" src="./js/app.jsx"></script>
-
-  <!-- Boot sentinel: tells me exactly which stage failed -->
-  <script>
-    (function () {
-      const TS = window.TS || {};
-      const required = ["GRID","clamp","generateLandUse","generatePOIs","estimateRouteDemand","useBanners"];
-      const missing = required.filter(k => TS[k] === undefined);
-      if (missing.length) {
-        console.error("Transit Simulator boot failed. Missing from TS:", missing);
-        const overlay = document.getElementById('error-overlay');
-        const msg = document.getElementById('err-msg');
-        overlay?.classList?.remove('hidden');
-        msg.textContent = "Boot failed. Missing: " + missing.join(", ");
-      } else {
-        console.log("Transit Simulator boot OK");
-      }
-    })();
+    const $ = s=>document.querySelector(s), rand=n=>Math.floor(Math.random()*n);
+    const GRID=20;
+    function sizeMap(){
+      const map=$("#mapSquare"),wrap=$("#centerCol .map-wrap");
+      const avail=Math.min(wrap.clientWidth,wrap.clientHeight);
+      const cell=Math.floor(avail/GRID), size=cell*GRID;
+      map.style.width=size+"px"; map.style.height=size+"px";
+      map.querySelector(".gridLines").style.backgroundSize=cell+"px "+cell+"px";
+      map.dataset.cell=cell;
+    }
+    function placeEmoji(){
+      const map=$("#mapSquare"); [...map.querySelectorAll(".tile")].forEach(n=>n.remove());
+      const cell=parseInt(map.dataset.cell||"24",10);
+      const add=(e,gx,gy)=>{const d=document.createElement("div"); d.className="tile"; d.style.left=(gx*cell+cell/2)+"px"; d.style.top=(gy*cell+cell/2)+"px"; d.textContent=e; map.appendChild(d);};
+      for(let i=0;i<60;i++) add("🏠",rand(GRID),rand(GRID));
+      const pois=["🛍️","🏫","🎡","🏥","🏢","🍔"];
+      for(let i=0;i<24;i++) add(pois[rand(pois.length)],rand(GRID),rand(GRID));
+    }
+    function init(){
+      sizeMap(); placeEmoji();
+      $("#fareMinus").onclick=()=>{let c=parseFloat($("#fare").textContent.slice(1)); c=Math.max(1.5,c-0.05); $("#fare").textContent=`$${c.toFixed(2)}`;};
+      $("#farePlus").onclick=()=>{let c=parseFloat($("#fare").textContent.slice(1)); c=Math.min(3,c+0.05); $("#fare").textContent=`$${c.toFixed(2)}`;};
+      window.addEventListener("resize",()=>{sizeMap();placeEmoji();});
+    }
+    window.addEventListener("DOMContentLoaded",init);
   </script>
 </body>
 </html>
