@@ -1469,52 +1469,54 @@
                 </div>
               </div>
             </div>
+            {settingsOpen && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4" role="dialog" aria-modal="true">
+                <div className="w-full max-w-lg rounded-xl bg-white shadow-xl">
+                  <div className="flex items-center justify-between border-b px-4 py-3">
+                    <h3 className="font-semibold">Settings</h3>
+                    <button
+                      type="button"
+                      className="rounded-md px-2 py-1 text-slate-600 hover:bg-slate-100"
+                      onClick={() => setSettingsOpen(false)}
+                      aria-label="Close settings"
+                    >
+                      ✕
+                    </button>
+                  </div>
+
+                  <div className="space-y-4 px-4 py-4">
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={autoSkipIdle}
+                        onChange={(e) => setAutoSkipIdle(e.target.checked)}
+                      />
+                      <span>Auto-skip idle minutes</span>
+                    </label>
+                  </div>
+
+                  <div className="flex justify-end gap-2 border-t px-4 py-3">
+                    <button
+                      type="button"
+                      className="rounded-md bg-slate-100 px-3 py-1.5 hover:bg-slate-200"
+                      onClick={() => setSettingsOpen(false)}
+                    >
+                      Done
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}  {/* <-- IMPORTANT: closes the modal's { ... ( ... ) } */}
+
           </main>
-        </div>
 
-      {settingsOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4" role="dialog" aria-modal="true">
-          <div className="w-full max-w-lg rounded-xl bg-white shadow-xl">
-            <div className="flex items-center justify-between border-b px-4 py-3">
-              <h3 className="font-semibold">Settings</h3>
-              <button
-                type="button"
-                className="rounded-md px-2 py-1 text-slate-600 hover:bg-slate-100"
-                onClick={() => setSettingsOpen(false)}
-                aria-label="Close settings"
-              >
-                ✕
-              </button>
-            </div>
+      </div>
 
-            <div className="space-y-4 px-4 py-4">
-              <label className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={autoSkipIdle}
-                  onChange={(e) => setAutoSkipIdle(e.target.checked)}
-                />
-                <span>Auto-skip idle minutes</span>
-              </label>
-              {/* add more settings here if needed */}
-            </div>
-
-            <div className="flex justify-end gap-2 border-t px-4 py-3">
-              <button
-                type="button"
-                className="rounded-md bg-slate-100 px-3 py-1.5 hover:bg-slate-200"
-                onClick={() => setSettingsOpen(false)}
-              >
-                Done
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </>
-  ); // close return
-  }
-  TS.App = App;
+  ); // <-- closes: return ( <React.Fragment> ... )
 
+} // end function App
+
+  TS.App = App;
   ReactDOM.createRoot(document.getElementById('root')).render(<App />);
 })(window);
