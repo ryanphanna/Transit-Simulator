@@ -50,6 +50,11 @@
     .hstack{display:flex; align-items:center; gap:8px; flex-wrap:wrap;}
     .stat{font-weight:700; color:#059669; font-size:28px;}
     .muted{color:#64748b; font-size:13px;}
+    .demandHeat { position:absolute; inset:0; pointer-events:none; }
+    .heatDot { position:absolute; width:10px; height:10px; border-radius:50%; background:rgba(239,68,68,0.22); transform:translate(-50%,-50%); filter:blur(4px); }
+    .odLine { position:absolute; pointer-events:none; }
+    .odLine svg { overflow:visible; }
+    .badge { display:inline-block; padding:2px 8px; border-radius:9999px; background:#fee2e2; color:#991b1b; font-size:12px; font-weight:600; }
   </style>
 </head>
 <body>
@@ -77,6 +82,10 @@
         <div class="section"><div class="muted">Riders / hr</div><div id="rph">0</div></div>
         <div class="section"><div class="muted">Vehicles in use</div><div id="veh">0 / 10 (Spare: 10)</div></div>
         <div class="section"><div class="muted">Daily money</div><div id="money">$0 – $0 = $0</div></div>
+        <div class="section">
+          <div class="muted">Potential trips / day</div>
+          <div id="potentialTrips">—</div>
+        </div>
       </aside>
 
       <section class="col col-center card" id="centerCol">
@@ -91,36 +100,234 @@
         <div class="section"><strong>Routes</strong><div class="muted">Route controls coming soon.</div></div>
         <div class="section"><strong>Fare &amp; Policy</strong><div class="hstack"><button class="btn" id="fareMinus">–</button><div id="fare">$2.00</div><button class="btn" id="farePlus">+</button></div><div class="muted">Range: $1.50 – $3.00</div></div>
         <div class="section"><strong>Service Hours</strong><div class="muted">Start 06:00 · End 22:00</div></div>
+        <div class="section">
+          <strong>Demand</strong>
+          <div class="hstack" style="margin-top:6px;">
+            <label class="hstack">
+              <input id="toggleDemandHeat" type="checkbox" />
+              <span class="muted">Show demand heat</span>
+            </label>
+            <label class="hstack">
+              <input id="toggleInspector" type="checkbox" />
+              <span class="muted">Demand inspector</span>
+            </label>
+          </div>
+          <div class="muted" id="demandSummary" style="margin-top:6px;">Potential trips/day: —</div>
+        </div>
       </aside>
     </div>
   </main>
 
   <script>
-    const $ = s=>document.querySelector(s), rand=n=>Math.floor(Math.random()*n);
-    const GRID=20;
-    function sizeMap(){
-      const map=$("#mapSquare"),wrap=$("#centerCol .map-wrap");
-      const avail=Math.min(wrap.clientWidth,wrap.clientHeight);
-      const cell=Math.floor(avail/GRID), size=cell*GRID;
-      map.style.width=size+"px"; map.style.height=size+"px";
-      map.querySelector(".gridLines").style.backgroundSize=cell+"px "+cell+"px";
-      map.dataset.cell=cell;
+  const $ = s=>document.querySelector(s), $$ = s=>[...document.querySelectorAll(s)];
+  const rand=n=>Math.floor(Math.random()*n);
+
+  // --- CONFIG (tweak later)
+  const GRID=20;          // tiles per side
+  const HOMES=60;         // number of homes emoji
+  const POIS=24;          // number of POIs emoji
+  const POI_TYPES=['🛍️','🏫','🎡','🏥','🏢','🍔'];
+  const ATTR = {         // attractiveness by type (rough)
+    '🛍️':1.2,'🏫':1.0,'🎡':0.8,'🏥':0.6,'🏢':0.9,'🍔':0.7
+  };
+  const DIST_DECAY=0.06;  // higher → fewer long trips
+  const TRIPS_PER_HOME=8; // target avg daily trips per home (both ways counted as 2)
+
+  // --- MAP SIZING (square fits viewport)
+  function sizeMap(){
+    const map=$("#mapSquare"),wrap=$("#centerCol .map-wrap");
+    const avail=Math.min(wrap.clientWidth,wrap.clientHeight);
+    const cell=Math.max(16, Math.floor(avail/GRID)), size=cell*GRID;
+    map.style.width=size+"px"; map.style.height=size+"px";
+    map.querySelector(".gridLines").style.backgroundSize=cell+"px "+cell+"px";
+    map.dataset.cell=cell;
+  }
+
+  // --- STATE
+  let homes=[], pois=[];
+  let od=[]; // list of {ox,oy,dx,dy,tripsPerDay,type,dist}
+  let inspectorOn=false, heatOn=false;
+
+  // --- helpers
+  function addTile(emoji,gx,gy,scale=1){
+    const map=$("#mapSquare");
+    const cell=parseInt(map.dataset.cell||"24",10);
+    const d=document.createElement("div");
+    d.className="tile";
+    d.style.left=(gx*cell+cell/2)+"px";
+    d.style.top=(gy*cell+cell/2)+"px";
+    d.style.fontSize=Math.round(16*scale)+"px";
+    d.textContent=emoji;
+    d.dataset.gx=gx; d.dataset.gy=gy; d.dataset.emoji=emoji;
+    map.appendChild(d);
+    return d;
+  }
+  function dist(a,b){ const dx=a.x-b.x, dy=a.y-b.y; return Math.hypot(dx,dy); }
+
+  // --- city generation: homes + destinations
+  function generateCity(){
+    homes=[]; pois=[];
+    const map=$("#mapSquare");
+    // clear old emoji tiles (keep grid & overlays)
+    [...map.querySelectorAll(".tile")].forEach(n=>n.remove());
+    // simple clustered homes (near middle-ish)
+    for(let i=0;i<HOMES;i++){
+      const gx=Math.min(GRID-1, Math.max(0, rand(GRID) + (rand(3)-1)));
+      const gy=Math.min(GRID-1, Math.max(0, rand(GRID) + (rand(3)-1)));
+      const el=addTile('🏠',gx,gy,1+Math.random()*0.3);
+      homes.push({x:gx,y:gy,el});
     }
-    function placeEmoji(){
-      const map=$("#mapSquare"); [...map.querySelectorAll(".tile")].forEach(n=>n.remove());
-      const cell=parseInt(map.dataset.cell||"24",10);
-      const add=(e,gx,gy)=>{const d=document.createElement("div"); d.className="tile"; d.style.left=(gx*cell+cell/2)+"px"; d.style.top=(gy*cell+cell/2)+"px"; d.textContent=e; map.appendChild(d);};
-      for(let i=0;i<60;i++) add("🏠",rand(GRID),rand(GRID));
-      const pois=["🛍️","🏫","🎡","🏥","🏢","🍔"];
-      for(let i=0;i<24;i++) add(pois[rand(pois.length)],rand(GRID),rand(GRID));
+    for(let i=0;i<POIS;i++){
+      const t=POI_TYPES[rand(POI_TYPES.length)];
+      const gx=rand(GRID), gy=rand(GRID);
+      const el=addTile(t,gx,gy,1.1);
+      pois.push({x:gx,y:gy,el,type:t,attr:ATTR[t]||1});
     }
-    function init(){
-      sizeMap(); placeEmoji();
-      $("#fareMinus").onclick=()=>{let c=parseFloat($("#fare").textContent.slice(1)); c=Math.max(1.5,c-0.05); $("#fare").textContent=`$${c.toFixed(2)}`;};
-      $("#farePlus").onclick=()=>{let c=parseFloat($("#fare").textContent.slice(1)); c=Math.min(3,c+0.05); $("#fare").textContent=`$${c.toFixed(2)}`;};
-      window.addEventListener("resize",()=>{sizeMap();placeEmoji();});
+  }
+
+  // --- OD generation: for each home, allocate daily trips to top-K nearby POIs by gravity model
+  function buildOD(){
+    od.length=0;
+    let total=0;
+    for(const h of homes){
+      // score each POI by attractiveness * f(distance)
+      const scored=pois.map(p=>{
+        const d=dist(h,p);
+        const w=p.attr * Math.exp(-DIST_DECAY*d);
+        return {p,w,d};
+      }).filter(r=>r.w>0.01).sort((a,b)=>b.w-a.w);
+
+      // take top 6 targets, normalize to daily trips
+      const top=scored.slice(0,6);
+      const sumW=top.reduce((s,r)=>s+r.w,0)||1;
+      for(const r of top){
+        const share=r.w/sumW;
+        const trips=Math.max(0, Math.round(TRIPS_PER_HOME*share));
+        if(trips>0){
+          od.push({ox:h.x,oy:h.y,dx:r.p.x,dy:r.p.y,tripsPerDay:trips,type:r.p.type,dist:r.d});
+          total+=trips;
+        }
+      }
     }
-    window.addEventListener("DOMContentLoaded",init);
-  </script>
+    $("#demandSummary").textContent=`Potential trips/day: ${total.toLocaleString()}`;
+    $("#potentialTrips") && ($("#potentialTrips").textContent = total.toLocaleString());
+  }
+
+  // --- Demand Heat overlay
+  function renderHeat(){
+    const map=$("#mapSquare");
+    let layer=map.querySelector(".demandHeat");
+    if(!layer){ layer=document.createElement("div"); layer.className="demandHeat"; map.appendChild(layer); }
+    layer.innerHTML="";
+    if(!heatOn) return;
+    const cell=parseInt(map.dataset.cell||"24",10);
+    // intensity per origin
+    const byOrigin = new Map();
+    for(const t of od){
+      const key=t.ox+","+t.oy;
+      byOrigin.set(key,(byOrigin.get(key)||0)+t.tripsPerDay);
+    }
+    // scale dots
+    const vals=[...byOrigin.values()];
+    const max=Math.max(1, ...vals);
+    for(const [key,v] of byOrigin.entries()){
+      const [gx,gy]=key.split(",").map(Number);
+      const dot=document.createElement("div");
+      dot.className="heatDot";
+      dot.style.left=(gx*cell+cell/2)+"px";
+      dot.style.top =(gy*cell+cell/2)+"px";
+      const alpha = 0.18 + 0.30*(v/max);
+      dot.style.background=`rgba(239,68,68,${alpha.toFixed(2)})`;
+      dot.style.width = (10 + 14*(v/max))+"px";
+      dot.style.height= (10 + 14*(v/max))+"px";
+      layer.appendChild(dot);
+    }
+  }
+
+  // --- Demand Inspector: click a 🏠 to draw its OD lines to top destinations
+  let inspectorLayer;
+  function enableInspectorHandlers(){
+    const map=$("#mapSquare");
+    if(!inspectorLayer){
+      inspectorLayer=document.createElement("div");
+      inspectorLayer.className="odLine";
+      map.appendChild(inspectorLayer);
+    }
+    map.addEventListener("click", onMapClick);
+  }
+  function disableInspectorHandlers(){
+    const map=$("#mapSquare");
+    map.removeEventListener("click", onMapClick);
+    if(inspectorLayer) inspectorLayer.innerHTML="";
+  }
+  function onMapClick(e){
+    // only react if clicked near a home
+    const cell=parseInt($("#mapSquare").dataset.cell||"24",10);
+    const rect=$("#mapSquare").getBoundingClientRect();
+    const mx=e.clientX-rect.left, my=e.clientY-rect.top;
+    const gx=Math.floor(mx/cell), gy=Math.floor(my/cell);
+    // find nearest home within 1 cell
+    let nearest=null, best=1e9;
+    for(const h of homes){
+      const d=Math.hypot(h.x-gx, h.y-gy);
+      if(d<best){best=d; nearest=h;}
+    }
+    if(!nearest || best>1.1){ // not a home
+      if(inspectorLayer) inspectorLayer.innerHTML="";
+      return;
+    }
+    // draw lines for this home
+    const list=od.filter(t=>t.ox===nearest.x && t.oy===nearest.y).sort((a,b)=>b.tripsPerDay-a.tripsPerDay).slice(0,6);
+    drawODLines(list);
+  }
+  function drawODLines(list){
+    inspectorLayer.innerHTML="";
+    const cell=parseInt($("#mapSquare").dataset.cell||"24",10);
+    for(const t of list){
+      const x1=t.ox*cell+cell/2, y1=t.oy*cell+cell/2;
+      const x2=t.dx*cell+cell/2, y2=t.dy*cell+cell/2;
+      const w = Math.max(1, Math.round(1 + t.tripsPerDay/6));
+      const svg = document.createElementNS("http://www.w3.org/2000/svg","svg");
+      svg.setAttribute("style","position:absolute; left:0; top:0; width:100%; height:100%;");
+      const line = document.createElementNS("http://www.w3.org/2000/svg","line");
+      line.setAttribute("x1",x1); line.setAttribute("y1",y1);
+      line.setAttribute("x2",x2); line.setAttribute("y2",y2);
+      line.setAttribute("stroke","rgba(220,38,38,0.6)");
+      line.setAttribute("stroke-width",w);
+      line.setAttribute("stroke-linecap","round");
+      svg.appendChild(line);
+      inspectorLayer.appendChild(svg);
+    }
+  }
+
+  // --- init & resize
+  function rebuildAll(){
+    sizeMap();
+    generateCity();
+    buildOD();
+    renderHeat();
+  }
+
+  function init(){
+    rebuildAll();
+    // controls
+    $("#fareMinus").onclick=()=>{let c=parseFloat($("#fare").textContent.slice(1)); c=Math.max(1.5,c-0.05); $("#fare").textContent=`$${c.toFixed(2)}`;};
+    $("#farePlus").onclick=()=>{let c=parseFloat($("#fare").textContent.slice(1)); c=Math.min(3,c+0.05); $("#fare").textContent=`$${c.toFixed(2)}`;};
+    window.addEventListener("resize",()=>{ sizeMap(); renderHeat(); /* positions persist */ });
+
+    // Demand toggles
+    $("#toggleDemandHeat").addEventListener("change",(e)=>{ heatOn=e.target.checked; renderHeat(); });
+    $("#toggleInspector").addEventListener("change",(e)=>{ inspectorOn=e.target.checked; if(inspectorOn) enableInspectorHandlers(); else disableInspectorHandlers(); });
+
+    // “New Map” button should rebuild city+demand
+    $("#newmap").addEventListener("click", ()=>{ rebuildAll(); });
+
+    // Basic top bar button placeholders (unchanged)
+    $("#play").addEventListener("click", ()=> alert('Play/pause coming next.'));
+    $("#jump").addEventListener("click", ()=> alert('Jump to service start coming next.'));
+  }
+
+  window.addEventListener("DOMContentLoaded", init);
+</script>
 </body>
 </html>
