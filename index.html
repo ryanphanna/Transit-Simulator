@@ -26,7 +26,7 @@
     #topbar{
       min-height: var(--topbar-h);
       display:grid;
-      grid-template-columns: auto 1fr auto;
+      grid-template-columns: 1fr auto 1fr;
       align-items:center;
       padding: 0 var(--bezel-x);
       gap:12px;
@@ -34,9 +34,9 @@
       background: #f7fcfa;
       position: sticky; top:0; z-index: 10;
     }
-    #topbarLeft{align-items:center; gap:16px;}
-    #topbarCenter{display:flex; justify-content:center; align-items:center; text-align:center;}
-    #topbarControls{display:flex; align-items:center; gap:12px; flex-wrap:wrap; justify-content:flex-end;}
+    #topbarLeft{align-items:center; gap:16px; justify-self:start;}
+    #topbarCenter{display:flex; justify-content:center; align-items:center; text-align:center; justify-self:center;}
+    #topbarControls{display:flex; align-items:center; gap:12px; flex-wrap:wrap; justify-content:flex-end; justify-self:end;}
     @media (max-width: 768px){
       #topbar{grid-template-columns: 1fr; justify-items:center;}
       #topbarLeft,#topbarControls{justify-content:center; text-align:center;}
