@@ -25,13 +25,22 @@
     }
     #topbar{
       min-height: var(--topbar-h);
-      display:flex; align-items:center; justify-content:space-between;
+      display:grid;
+      grid-template-columns: auto 1fr auto;
+      align-items:center;
       padding: 0 var(--bezel-x);
-      gap:12px; border-bottom:1px solid #e8f3ee; background: #f7fcfa;
+      gap:12px;
+      border-bottom:1px solid #e8f3ee;
+      background: #f7fcfa;
       position: sticky; top:0; z-index: 10;
-      flex-wrap:wrap;
     }
     #topbarLeft{align-items:center; gap:16px;}
+    #topbarCenter{display:flex; justify-content:center; align-items:center; text-align:center;}
+    #topbarControls{display:flex; align-items:center; gap:12px; flex-wrap:wrap; justify-content:flex-end;}
+    @media (max-width: 768px){
+      #topbar{grid-template-columns: 1fr; justify-items:center;}
+      #topbarLeft,#topbarControls{justify-content:center; text-align:center;}
+    }
     .app-title{font-size:20px; color:#0f172a; letter-spacing:0.02em;}
     .btn{height:32px; padding:0 10px; border:1px solid #cae9df; border-radius:10px; background:#fff; cursor:pointer;}
     .btn.active{background:#d1fae5; border-color:#34d399;}
@@ -72,17 +81,17 @@
 <body>
   <header id="topbar">
     <div class="hstack" id="topbarLeft">
-      <strong class="app-title">Transit Simulator</strong>
       <div class="muted" id="clock">Day 1 · 06:00 — In service</div>
     </div>
-    <div class="hstack">
+    <div id="topbarCenter">
+      <strong class="app-title">Transit Simulator</strong>
+    </div>
+    <div class="hstack" id="topbarControls">
       <button class="btn" id="play">▶ Play</button>
       <button class="btn spd" data-x="1">1×</button>
       <button class="btn spd" data-x="4">4×</button>
       <button class="btn spd" data-x="10">10×</button>
       <button class="btn" id="jump">⏭ Jump</button>
-    </div>
-    <div class="hstack">
       <button class="btn" id="settings">⚙ Settings</button>
       <button class="btn" id="reset">⟲ Reset</button>
       <button class="btn" id="newmap">🗺️ New Map</button>
