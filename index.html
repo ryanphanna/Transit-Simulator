@@ -427,6 +427,9 @@
 
   function addStopToRoute(route,gx,gy){
     const stop=ensureStop(gx,gy);
+    if(route.stops.includes(stop.id)){
+      return;
+    }
     route.stops.push(stop.id);
     stop.usage=(stop.usage||0)+1;
     updateRouteMetrics(route);
