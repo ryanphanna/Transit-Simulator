@@ -34,12 +34,13 @@
       background: #f7fcfa;
       position: sticky; top:0; z-index: 10;
     }
-    #topbarLeft{align-items:center; gap:16px; justify-self:start;}
+    #topbarLeft{align-items:center; gap:12px; justify-self:start;}
     #topbarCenter{display:flex; justify-content:center; align-items:center; text-align:center; justify-self:center;}
-    #topbarControls{display:flex; align-items:center; gap:12px; flex-wrap:wrap; justify-content:flex-end; justify-self:end;}
+    #topbarRight{display:flex; align-items:center; gap:12px; flex-wrap:wrap; justify-content:flex-end; justify-self:end;}
     @media (max-width: 768px){
       #topbar{grid-template-columns: 1fr; justify-items:center;}
-      #topbarLeft,#topbarControls{justify-content:center; text-align:center;}
+      #topbarLeft,#topbarRight{justify-content:center; text-align:center;}
+      #topbarCenter{order:-1;}
     }
     .app-title{font-size:20px; color:#0f172a; letter-spacing:0.02em;}
     .btn{height:32px; padding:0 10px; border:1px solid #cae9df; border-radius:10px; background:#fff; cursor:pointer;}
@@ -53,6 +54,7 @@
     .col-center{overflow: hidden; display:flex;}
     .center-card{display:flex; flex-direction:column; width:100%;}
     .center-head,.center-foot{padding:12px 14px; border-bottom:1px solid #e9f4ef;}
+    .center-head{display:flex; flex-direction:column; gap:4px;}
     .center-foot{border-top:1px solid #e9f4ef; border-bottom:0;}
     .map-wrap{flex:1; display:grid; place-content:center; overflow:hidden;}
     #mapSquare{background:#f6fbf9; border:1px solid #e3f2ec; border-radius:12px; position:relative;}
@@ -81,16 +83,15 @@
 <body>
   <header id="topbar">
     <div class="hstack" id="topbarLeft">
-      <div class="muted" id="clock">Day 1 · 06:00 — In service</div>
-    </div>
-    <div id="topbarCenter">
-      <strong class="app-title">Transit Simulator</strong>
-    </div>
-    <div class="hstack" id="topbarControls">
       <button class="btn" id="play">▶ Play</button>
       <button class="btn spd" data-x="1">1×</button>
       <button class="btn spd" data-x="4">4×</button>
       <button class="btn spd" data-x="10">10×</button>
+    </div>
+    <div id="topbarCenter">
+      <strong class="app-title">Transit Simulator</strong>
+    </div>
+    <div class="hstack" id="topbarRight">
       <button class="btn" id="jump">⏭ Jump</button>
       <button class="btn" id="settings">⚙ Settings</button>
       <button class="btn" id="reset">⟲ Reset</button>
@@ -113,7 +114,10 @@
 
       <section class="col col-center card" id="centerCol">
         <div class="center-card">
-          <div class="center-head"><div class="muted">Tutorial City · Population 100,000 · Goal: 5% for 30 days</div></div>
+          <div class="center-head">
+            <div class="muted" id="clock">Day 1 · 06:00 — In service (paused)</div>
+            <div class="muted">Tutorial City · Population 100,000 · Goal: 5% for 30 days</div>
+          </div>
           <div class="map-wrap"><div id="mapSquare"><div class="gridLines"></div></div></div>
           <div class="center-foot muted">Select a route to begin placing stops. Shift-click tiles to remove stops from the active route.</div>
         </div>
