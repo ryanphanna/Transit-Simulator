@@ -165,6 +165,11 @@
   const DIST_DECAY=0.06;  // higher → fewer long trips
   const TRIPS_PER_HOME=8; // target avg daily trips per home (both ways counted as 2)
   const MAX_VEHICLES=10;  // garage capacity
+  const KM_PER_TILE=0.4;  // rough size of one tile in km
+  const AVG_SPEED_KPH=22; // average operating speed
+  const DWELL_PER_STOP_MIN=0.5; // dwell time per stop in minutes
+  const TARGET_HEADWAY_MIN=10;  // target headway passengers expect
+  const MIN_LOOP_MINUTES=5;     // minimum practical loop cycle
   const MINUTES_PER_DAY=24*60;
   const SERVICE_START=6*60;
   const SERVICE_END=22*60;
@@ -226,6 +231,47 @@
 
   function stopKey(gx,gy){ return `${gx},${gy}`; }
 
+  function clamp(min,max,value){
+    return Math.min(max, Math.max(min, value));
+  }
+
+  function stopIdToCoords(stopId){
+    if(!stopId) return null;
+    const key=stopId.startsWith('s') ? stopId.slice(1) : stopId;
+    const stop=stops.get(key);
+    if(!stop) return null;
+    return {x:stop.x, y:stop.y};
+  }
+
+  function routeStopCoords(route){
+    if(!route) return [];
+    const coords=[];
+    const seen=new Set();
+    for(const stopId of route.stops){
+      if(seen.has(stopId)) continue;
+      const c=stopIdToCoords(stopId);
+      if(c){ coords.push(c); seen.add(stopId); }
+    }
+    return coords;
+  }
+
+  function computeLoopMinutes(route){
+    const coords=routeStopCoords(route);
+    if(coords.length<2){
+      return Math.max(MIN_LOOP_MINUTES, coords.length * DWELL_PER_STOP_MIN || MIN_LOOP_MINUTES);
+    }
+    let tileDistance=0;
+    for(let i=0;i<coords.length;i++){
+      const a=coords[i];
+      const b=coords[(i+1)%coords.length];
+      tileDistance+=Math.hypot(a.x-b.x, a.y-b.y);
+    }
+    const travelKm=tileDistance*KM_PER_TILE;
+    const travelMinutes=(travelKm/AVG_SPEED_KPH)*60;
+    const dwellMinutes=coords.length*DWELL_PER_STOP_MIN;
+    return Math.max(MIN_LOOP_MINUTES, travelMinutes+dwellMinutes);
+  }
+
   function escapeHTML(str){
     return (str??'').replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]||c));
   }
@@ -279,7 +325,7 @@
     const id=`r${routeSeq++}`;
     const colors=['#1d4ed8','#dc2626','#047857','#9333ea','#f59e0b','#0891b2'];
     const color=colors[(routes.length)%colors.length];
-    const route={id,name:`Route ${routes.length+1}`,color,vehicles:1,stops:[],ridership:0};
+    const route={id,name:`Route ${routes.length+1}`,color,vehicles:1,stops:[],ridership:0,loopMinutes:MIN_LOOP_MINUTES,headway:Infinity,servedTripsPerDay:0};
     routes.push(route);
     selectRoute(id);
     renderRoutesPanel();
@@ -300,8 +346,41 @@
   }
 
   function updateRouteMetrics(route){
-    const uniqueStops=new Set(route.stops).size;
-    route.ridership=Math.round(uniqueStops * 14 * Math.max(0, route.vehicles));
+    const coords=routeStopCoords(route);
+    const loopMinutes=computeLoopMinutes(route);
+    const vehicles=Math.max(0, Number(route.vehicles)||0);
+    const headway=vehicles>0 ? loopMinutes/vehicles : Infinity;
+    route.loopMinutes=loopMinutes;
+    route.headway=headway;
+
+    if(coords.length<2){
+      route.ridership=0;
+      route.servedTripsPerDay=0;
+      return;
+    }
+
+    const coverageRadius=1.01;
+    let servedTrips=0;
+    for(const trip of od){
+      const originServed=coords.some(c=>Math.hypot(c.x-trip.ox, c.y-trip.oy)<=coverageRadius);
+      if(!originServed) continue;
+      const destServed=coords.some(c=>Math.hypot(c.x-trip.dx, c.y-trip.dy)<=coverageRadius);
+      if(!destServed) continue;
+      servedTrips+=trip.tripsPerDay;
+    }
+
+    route.servedTripsPerDay=servedTrips;
+
+    const serviceHours=Math.max(1, (SERVICE_END-SERVICE_START)/60);
+    const hourlyDemand=servedTrips/serviceHours;
+    if(!servedTrips || !isFinite(headway) || vehicles<=0){
+      route.ridership=0;
+      return;
+    }
+
+    const effectiveHeadway=Math.max(headway, 0.1);
+    const waitFactor=clamp(0,1, TARGET_HEADWAY_MIN/effectiveHeadway);
+    route.ridership=Math.round(hourlyDemand*waitFactor);
   }
 
   function updateRouteStats(){
@@ -330,10 +409,13 @@
     }
     const uniqueStops=new Set(route.stops).size;
     const safeName=escapeHTML(route.name||'');
+    const loopLabel = route.loopMinutes ? route.loopMinutes.toFixed(1) : '—';
+    const headwayLabel = (route.vehicles>0 && isFinite(route.headway)) ? `${route.headway.toFixed(1)} min` : 'No service';
     details.innerHTML=`<div><strong>${safeName}</strong></div>
       <div>Stops placed: ${route.stops.length} (${uniqueStops} unique)</div>
       <div>Vehicles assigned: ${route.vehicles}</div>
-      <div>Estimated riders / hr: ${route.ridership.toLocaleString()}</div>
+      <div>Loop time: ${loopLabel} min · Headway: ${headwayLabel}</div>
+      <div>Estimated riders / hr (frequency-adjusted): ${route.ridership.toLocaleString()}</div>
       <div style="margin-top:6px;">Click the map to add stops. Shift-click to remove the stop for this tile.</div>`;
   }
 
@@ -402,7 +484,13 @@
       stopsSpan.textContent=`Stops: ${routeStopCount(route)}`;
 
       const ridersSpan=document.createElement("span");
-      ridersSpan.textContent=`Riders/hr: ${route.ridership.toLocaleString()}`;
+      ridersSpan.textContent=`Riders/hr*: ${route.ridership.toLocaleString()}`;
+      ridersSpan.title='Ridership scales with headway — assign more vehicles for higher frequency.';
+
+      const headwaySpan=document.createElement("span");
+      headwaySpan.textContent=route.vehicles>0 && isFinite(route.headway)
+        ? `Headway: ${route.headway.toFixed(1)} min`
+        : 'Headway: No service';
 
       const vehiclesLabel=document.createElement("label");
       vehiclesLabel.textContent="Vehicles";
@@ -425,6 +513,7 @@
 
       meta.appendChild(stopsSpan);
       meta.appendChild(ridersSpan);
+      meta.appendChild(headwaySpan);
       meta.appendChild(vehiclesLabel);
       item.appendChild(meta);
 
@@ -537,6 +626,9 @@
     }
     $("#demandSummary").textContent=`Potential trips/day: ${total.toLocaleString()}`;
     $("#potentialTrips") && ($("#potentialTrips").textContent = total.toLocaleString());
+    updateRouteStats();
+    renderRoutesPanel();
+    updateRouteDetails();
   }
 
   // --- Demand Heat overlay
