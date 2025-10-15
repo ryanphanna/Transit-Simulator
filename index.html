@@ -31,6 +31,7 @@
       position: sticky; top:0; z-index: 10;
     }
     .btn{height:32px; padding:0 10px; border:1px solid #cae9df; border-radius:10px; background:#fff; cursor:pointer;}
+    .btn.active{background:#d1fae5; border-color:#34d399;}
     #viewport{height: calc(100vh - var(--topbar-h)); padding: 16px var(--bezel-x); overflow: hidden;}
     .grid3{display:grid; height:100%; gap: var(--col-gap); grid-template-columns: 1fr;}
     @media (min-width: 1024px){.grid3{grid-template-columns: var(--left-w) minmax(560px, 1fr) var(--right-w);}}
@@ -150,6 +151,28 @@
   const DIST_DECAY=0.06;  // higher → fewer long trips
   const TRIPS_PER_HOME=8; // target avg daily trips per home (both ways counted as 2)
   const MAX_VEHICLES=10;  // garage capacity
+  const MINUTES_PER_DAY=24*60;
+  const SERVICE_START=6*60;
+  const SERVICE_END=22*60;
+  const VEHICLE_COST_PER_HOUR=95;
+  const BASE_CASH=5_000_000;
+  const FARE_MIN=1.5;
+  const FARE_MAX=3.0;
+  const FARE_STEP=0.05;
+  const DEFAULT_FARE=2.0;
+
+  let simMinute=SERVICE_START;
+  let simDay=1;
+  let simRunning=false;
+  let simTimer=null;
+  let simSpeed=1;
+  let cash=BASE_CASH;
+  let fare=DEFAULT_FARE;
+  let ridersToday=0;
+  let revenueToday=0;
+  let expensesToday=0;
+  let lastRidershipHr=0;
+  let lastVehiclesUsed=0;
 
   // --- MAP SIZING (square fits viewport)
   function sizeMap(){
@@ -274,6 +297,8 @@
       vehiclesUsed+=route.vehicles;
       ridershipHr+=route.ridership;
     }
+    lastVehiclesUsed=vehiclesUsed;
+    lastRidershipHr=ridershipHr;
     const spare=Math.max(0, MAX_VEHICLES-vehiclesUsed);
     const vehLabel=$("#veh");
     if(vehLabel){ vehLabel.textContent=`${vehiclesUsed} / ${MAX_VEHICLES} (Spare: ${spare})`; }
@@ -593,11 +618,156 @@
     renderHeat();
   }
 
+  function formatMoney(value){
+    const sign=value<0?"-":"";
+    const abs=Math.abs(value);
+    return `${sign}$${abs.toLocaleString(undefined,{minimumFractionDigits:2, maximumFractionDigits:2})}`;
+  }
+
+  function updateFinanceUI(){
+    const cashEl=$("#cash");
+    if(cashEl){ cashEl.textContent=formatMoney(cash); }
+    const money=$("#money");
+    if(money){
+      const net=revenueToday-expensesToday;
+      money.textContent=`${formatMoney(revenueToday)} – ${formatMoney(expensesToday)} = ${formatMoney(net)}`;
+    }
+  }
+
+  function formatTime(minute){
+    const h=Math.floor(minute/60)%24;
+    const m=minute%60;
+    return `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}`;
+  }
+
+  function serviceStatus(){
+    let base;
+    if(simMinute < SERVICE_START) base="Before service";
+    else if(simMinute >= SERVICE_END) base="After service";
+    else base="In service";
+    if(!simRunning && simMinute>=SERVICE_START && simMinute<SERVICE_END) base+=" (paused)";
+    return base;
+  }
+
+  function updateClockLabel(){
+    const clock=$("#clock");
+    if(clock){
+      clock.textContent=`Day ${simDay} · ${formatTime(simMinute)} — ${serviceStatus()}`;
+    }
+  }
+
+  function resetDailyTallies(){
+    ridersToday=0;
+    revenueToday=0;
+    expensesToday=0;
+    updateFinanceUI();
+  }
+
+  function updatePlayButton(){
+    const btn=$("#play");
+    if(btn){ btn.textContent=simRunning?"⏸ Pause":"▶ Play"; }
+  }
+
+  function updateSpeedButtons(){
+    $$(".spd").forEach(btn=>{
+      const mult=parseInt(btn.dataset.x||"1",10);
+      if(mult===simSpeed) btn.classList.add("active");
+      else btn.classList.remove("active");
+    });
+  }
+
+  function stopSimTimer(){
+    if(simTimer){ clearInterval(simTimer); simTimer=null; }
+  }
+
+  function setSimRunning(next){
+    if(simRunning===next) return;
+    simRunning=next;
+    updatePlayButton();
+    updateClockLabel();
+    if(simRunning){
+      stopSimTimer();
+      simTimer=setInterval(()=>advanceSim(simSpeed), 400);
+    }else{
+      stopSimTimer();
+    }
+  }
+
+  function setSpeed(mult){
+    simSpeed=mult;
+    updateSpeedButtons();
+  }
+
+  function stepMinute(){
+    const inService = simMinute>=SERVICE_START && simMinute<SERVICE_END;
+    const ridersPerMinute = inService ? lastRidershipHr/60 : 0;
+    const revenue = ridersPerMinute * fare;
+    const expenses = inService ? (lastVehiclesUsed * VEHICLE_COST_PER_HOUR)/60 : 0;
+    ridersToday += ridersPerMinute;
+    revenueToday = Math.round((revenueToday + revenue)*100)/100;
+    expensesToday = Math.round((expensesToday + expenses)*100)/100;
+    cash = Math.round((cash + revenue - expenses)*100)/100;
+
+    simMinute++;
+    if(simMinute>=MINUTES_PER_DAY){
+      simMinute=0;
+      simDay++;
+      resetDailyTallies();
+    }
+  }
+
+  function advanceSim(minutes){
+    for(let i=0;i<minutes;i++){
+      stepMinute();
+    }
+    updateClockLabel();
+    updateFinanceUI();
+  }
+
+  function resetSimulationState(){
+    stopSimTimer();
+    simRunning=false;
+    simDay=1;
+    simMinute=SERVICE_START;
+    cash=BASE_CASH;
+    fare=DEFAULT_FARE;
+    simSpeed=1;
+    resetDailyTallies();
+    updateFareDisplay();
+    updatePlayButton();
+    updateSpeedButtons();
+    updateClockLabel();
+  }
+
+  function jumpToServiceStart(){
+    setSimRunning(false);
+    if(simMinute >= SERVICE_START){
+      simDay++;
+      resetDailyTallies();
+    }
+    simMinute=SERVICE_START;
+    updateClockLabel();
+    updateFinanceUI();
+  }
+
+  function updateFareDisplay(){
+    const fareLabel=$("#fare");
+    if(fareLabel){ fareLabel.textContent=`$${fare.toFixed(2)}`; }
+  }
+
+  function setFare(value){
+    const clamped=Math.min(FARE_MAX, Math.max(FARE_MIN, Math.round(value*100)/100));
+    fare=clamped;
+    updateFareDisplay();
+  }
+
   function init(){
     rebuildAll();
+    resetSimulationState();
+
     // controls
-    $("#fareMinus").onclick=()=>{let c=parseFloat($("#fare").textContent.slice(1)); c=Math.max(1.5,c-0.05); $("#fare").textContent=`$${c.toFixed(2)}`;};
-    $("#farePlus").onclick=()=>{let c=parseFloat($("#fare").textContent.slice(1)); c=Math.min(3,c+0.05); $("#fare").textContent=`$${c.toFixed(2)}`;};
+    $("#fareMinus").onclick=()=>{ setFare(fare-FARE_STEP); };
+    $("#farePlus").onclick=()=>{ setFare(fare+FARE_STEP); };
     window.addEventListener("resize",()=>{ sizeMap(); renderHeat(); /* positions persist */ });
 
     $("#mapSquare").addEventListener("click", mapClickRouter);
@@ -610,12 +780,18 @@
     $("#toggleDemandHeat").addEventListener("change",(e)=>{ heatOn=e.target.checked; renderHeat(); });
     $("#toggleInspector").addEventListener("change",(e)=>{ inspectorOn=e.target.checked; if(inspectorOn) enableInspectorHandlers(); else disableInspectorHandlers(); });
 
-    // “New Map” button should rebuild city+demand
-    $("#newmap").addEventListener("click", ()=>{ rebuildAll(); });
+    // speed controls
+    $$(".spd").forEach(btn=>{
+      btn.addEventListener("click",()=>{
+        const mult=parseInt(btn.dataset.x||"1",10);
+        setSpeed(mult);
+      });
+    });
 
-    // Basic top bar button placeholders (unchanged)
-    $("#play").addEventListener("click", ()=> alert('Play/pause coming next.'));
-    $("#jump").addEventListener("click", ()=> alert('Jump to service start coming next.'));
+    $("#play").addEventListener("click", ()=>{ setSimRunning(!simRunning); });
+    $("#jump").addEventListener("click", ()=>{ jumpToServiceStart(); });
+    $("#newmap").addEventListener("click", ()=>{ setSimRunning(false); rebuildAll(); resetSimulationState(); });
+    $("#reset").addEventListener("click", ()=>{ setSimRunning(false); rebuildAll(); resetSimulationState(); });
   }
 
   window.addEventListener("DOMContentLoaded", init);
