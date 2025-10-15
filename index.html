@@ -24,12 +24,15 @@
       color:#0f172a;
     }
     #topbar{
-      height: var(--topbar-h);
+      min-height: var(--topbar-h);
       display:flex; align-items:center; justify-content:space-between;
       padding: 0 var(--bezel-x);
       gap:12px; border-bottom:1px solid #e8f3ee; background: #f7fcfa;
       position: sticky; top:0; z-index: 10;
+      flex-wrap:wrap;
     }
+    #topbarLeft{align-items:center; gap:16px;}
+    .app-title{font-size:20px; color:#0f172a; letter-spacing:0.02em;}
     .btn{height:32px; padding:0 10px; border:1px solid #cae9df; border-radius:10px; background:#fff; cursor:pointer;}
     .btn.active{background:#d1fae5; border-color:#34d399;}
     #viewport{height: calc(100vh - var(--topbar-h)); padding: 16px var(--bezel-x); overflow: hidden;}
@@ -68,8 +71,11 @@
 </head>
 <body>
   <header id="topbar">
-    <div class="hstack">
+    <div class="hstack" id="topbarLeft">
+      <strong class="app-title">Transit Simulator</strong>
       <div class="muted" id="clock">Day 1 · 06:00 — In service</div>
+    </div>
+    <div class="hstack">
       <button class="btn" id="play">▶ Play</button>
       <button class="btn spd" data-x="1">1×</button>
       <button class="btn spd" data-x="4">4×</button>
@@ -77,7 +83,6 @@
       <button class="btn" id="jump">⏭ Jump</button>
     </div>
     <div class="hstack">
-      <div class="muted">Fare $2.00</div>
       <button class="btn" id="settings">⚙ Settings</button>
       <button class="btn" id="reset">⟲ Reset</button>
       <button class="btn" id="newmap">🗺️ New Map</button>
@@ -99,7 +104,7 @@
 
       <section class="col col-center card" id="centerCol">
         <div class="center-card">
-          <div class="center-head"><strong>Transit Simulator</strong><div class="muted">Tutorial City · Population 100,000 · Goal: 5% for 30 days</div></div>
+          <div class="center-head"><div class="muted">Tutorial City · Population 100,000 · Goal: 5% for 30 days</div></div>
           <div class="map-wrap"><div id="mapSquare"><div class="gridLines"></div></div></div>
           <div class="center-foot muted">Select a route to begin placing stops. Shift-click tiles to remove stops from the active route.</div>
         </div>
