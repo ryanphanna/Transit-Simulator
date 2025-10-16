@@ -1040,7 +1040,16 @@
     // controls
     $("#fareMinus").onclick=()=>{ setFare(fare-FARE_STEP); };
     $("#farePlus").onclick=()=>{ setFare(fare+FARE_STEP); };
-    window.addEventListener("resize",()=>{ sizeMap(); renderHeat(); renderRouteOverlays(); /* positions persist */ });
+    window.addEventListener("resize",()=>{
+      // Recalculate map size and fully rebuild positions
+      const prevHeat = heatOn;
+      const prevInspector = inspectorOn;
+      sizeMap();
+      generateCity();
+      buildOD();
+      if(prevHeat) renderHeat();
+      if(prevInspector) enableInspectorHandlers();
+    });
 
     $("#mapSquare").addEventListener("click", mapClickRouter);
     $("#addRoute").addEventListener("click", ()=>{
