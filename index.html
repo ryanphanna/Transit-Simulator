@@ -226,16 +226,25 @@
   // --- helpers
   function addTile(emoji,gx,gy,scale=1){
     const map=$("#mapSquare");
-    const cell=parseInt(map.dataset.cell||"24",10);
     const d=document.createElement("div");
     d.className="tile";
-    d.style.left=(gx*cell+cell/2)+"px";
-    d.style.top=(gy*cell+cell/2)+"px";
-    d.style.fontSize=Math.round(16*scale)+"px";
+    d.dataset.gx=gx; d.dataset.gy=gy; d.dataset.scale=scale;
     d.textContent=emoji;
-    d.dataset.gx=gx; d.dataset.gy=gy; d.dataset.emoji=emoji;
     map.appendChild(d);
     return d;
+  }
+
+  function layoutTiles(){
+    const map=$("#mapSquare");
+    const cell=parseInt(map.dataset.cell||"24",10);
+    const tiles=$$("#mapSquare .tile");
+    const base = Math.max(12, Math.round(cell*0.55));
+    for(const el of tiles){
+      const gx=+el.dataset.gx, gy=+el.dataset.gy, sc=+(el.dataset.scale||1);
+      el.style.left = (gx*cell + cell/2) + "px";
+      el.style.top  = (gy*cell + cell/2) + "px";
+      el.style.fontSize = Math.round(base*sc) + "px";
+    }
   }
   function dist(a,b){ const dx=a.x-b.x, dy=a.y-b.y; return Math.hypot(dx,dy); }
 
@@ -738,24 +747,26 @@
   }
 
   // --- city generation: homes + destinations
-  function generateCity(){
+  function generateCityState(){
     homes=[]; pois=[];
-    const map=$("#mapSquare");
-    // clear old emoji tiles (keep grid & overlays)
-    [...map.querySelectorAll(".tile")].forEach(n=>n.remove());
-    // simple clustered homes (near middle-ish)
     for(let i=0;i<HOMES;i++){
       const gx=Math.min(GRID-1, Math.max(0, rand(GRID) + (rand(3)-1)));
       const gy=Math.min(GRID-1, Math.max(0, rand(GRID) + (rand(3)-1)));
-      const el=addTile('🏠',gx,gy,1+Math.random()*0.3);
-      homes.push({x:gx,y:gy,el});
+      homes.push({x:gx,y:gy,scale:1+Math.random()*0.3});
     }
     for(let i=0;i<POIS;i++){
       const t=POI_TYPES[rand(POI_TYPES.length)];
       const gx=rand(GRID), gy=rand(GRID);
-      const el=addTile(t,gx,gy,1.1);
-      pois.push({x:gx,y:gy,el,type:t,attr:ATTR[t]||1});
+      pois.push({x:gx,y:gy,type:t,attr:ATTR[t]||1,scale:1.1});
     }
+  }
+
+  function renderCityDOM(){
+    const map=$("#mapSquare");
+    [...map.querySelectorAll(".tile")].forEach(n=>n.remove());
+    for(const h of homes){ h.el = addTile('🏠', h.x, h.y, h.scale); }
+    for(const p of pois){ p.el = addTile(p.type, p.x, p.y, p.scale); }
+    layoutTiles();
   }
 
   // --- OD generation: for each home, allocate daily trips to top-K nearby POIs by gravity model
@@ -884,8 +895,8 @@
   // --- init & resize
   function rebuildAll(){
     sizeMap();
-    resetRoutes();
-    generateCity();
+    generateCityState();
+    renderCityDOM();
     buildOD();
     renderHeat();
   }
@@ -1041,14 +1052,12 @@
     $("#fareMinus").onclick=()=>{ setFare(fare-FARE_STEP); };
     $("#farePlus").onclick=()=>{ setFare(fare+FARE_STEP); };
     window.addEventListener("resize",()=>{
-      // Recalculate map size and fully rebuild positions
-      const prevHeat = heatOn;
-      const prevInspector = inspectorOn;
       sizeMap();
-      generateCity();
-      buildOD();
-      if(prevHeat) renderHeat();
-      if(prevInspector) enableInspectorHandlers();
+      layoutTiles();
+      renderHeat();
+      if(inspectorOn){
+        if(inspectorLayer) inspectorLayer.innerHTML="";
+      }
     });
 
     $("#mapSquare").addEventListener("click", mapClickRouter);
@@ -1071,8 +1080,8 @@
 
     $("#play").addEventListener("click", ()=>{ setSimRunning(!simRunning); });
     $("#jump").addEventListener("click", ()=>{ jumpToServiceStart(); });
-    $("#newmap").addEventListener("click", ()=>{ setSimRunning(false); rebuildAll(); resetSimulationState(); });
-    $("#reset").addEventListener("click", ()=>{ setSimRunning(false); rebuildAll(); resetSimulationState(); });
+    $("#newmap").addEventListener("click", ()=>{ setSimRunning(false); resetRoutes(); rebuildAll(); resetSimulationState(); });
+    $("#reset").addEventListener("click", ()=>{ setSimRunning(false); resetRoutes(); rebuildAll(); resetSimulationState(); });
   }
 
   window.addEventListener("DOMContentLoaded", init);
