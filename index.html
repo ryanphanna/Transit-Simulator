@@ -67,6 +67,15 @@
     .hstack{display:flex; align-items:center; gap:8px; flex-wrap:wrap;}
     .stat{font-weight:700; color:#059669; font-size:28px;}
     .muted{color:#64748b; font-size:13px;}
+    .status-bar {
+      text-align: center;
+      font-size: 0.95rem;
+      color: #475569;
+      margin-bottom: 0.5rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
     .demandHeat { position:absolute; inset:0; pointer-events:none; z-index:3; }
     .heatDot { position:absolute; width:10px; height:10px; border-radius:50%; background:rgba(239,68,68,0.22); transform:translate(-50%,-50%); filter:blur(4px); }
     .odLine { position:absolute; inset:0; pointer-events:none; z-index:5; }
@@ -118,8 +127,7 @@
       <section class="col col-center card" id="centerCol">
         <div class="center-card">
           <div class="center-head">
-            <div class="muted" id="clock">Day 1 · 06:00 — In service (paused)</div>
-            <div class="muted">Tutorial City · Population 100,000 · Goal: 5% for 30 days</div>
+            <div class="status-bar" id="clock">Day 1 · 06:00 — In service (paused) · Tutorial City · Population 100,000 · Goal: 5% for 30 days</div>
           </div>
           <div class="map-wrap"><div id="mapSquare"><div class="gridLines"></div></div></div>
           <div class="center-foot muted">Select a route to begin placing stops. Shift-click tiles to remove stops from the active route.</div>
