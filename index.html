@@ -67,14 +67,17 @@
     .hstack{display:flex; align-items:center; gap:8px; flex-wrap:wrap;}
     .stat{font-weight:700; color:#059669; font-size:28px;}
     .muted{color:#64748b; font-size:13px;}
-    .status-bar {
-      text-align: center;
-      font-size: 0.95rem;
-      color: #475569;
-      margin-bottom: 0.5rem;
+    .status-bar{
+      text-align:center;
+      font-size: 0.98rem;
+      color:#475569;
+      margin: 4px 0 10px;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
+    }
+    @media (max-width: 720px){
+      .status-bar{ white-space: normal; line-height: 1.35; }
     }
     .demandHeat { position:absolute; inset:0; pointer-events:none; z-index:3; }
     .heatDot { position:absolute; width:10px; height:10px; border-radius:50%; background:rgba(239,68,68,0.22); transform:translate(-50%,-50%); filter:blur(4px); }
@@ -127,7 +130,8 @@
       <section class="col col-center card" id="centerCol">
         <div class="center-card">
           <div class="center-head">
-            <div class="status-bar" id="clock">Day 1 · 06:00 — In service (paused) · Tutorial City · Population 100,000 · Goal: 5% for 30 days</div>
+            <!-- inside the center header above the map -->
+            <div id="statusBar" class="status-bar" aria-live="polite"></div>
           </div>
           <div class="map-wrap"><div id="mapSquare"><div class="gridLines"></div></div></div>
           <div class="center-foot muted">Select a route to begin placing stops. Shift-click tiles to remove stops from the active route.</div>
@@ -208,6 +212,12 @@
   let expensesToday=0;
   let lastRidershipHr=0;
   let lastVehiclesUsed=0;
+
+  window.TS = window.TS || {};
+  if(window.TS.cityName === undefined) window.TS.cityName = "Tutorial City";
+  if(window.TS.population === undefined) window.TS.population = 100000;
+  if(window.TS.goalPct === undefined) window.TS.goalPct = 5;
+  if(window.TS.goalDays === undefined) window.TS.goalDays = 30;
 
   // --- MAP SIZING (square fits viewport)
   function sizeMap(){
@@ -940,11 +950,33 @@
     return base;
   }
 
-  function updateClockLabel(){
-    const clock=$("#clock");
-    if(clock){
-      clock.textContent=`Day ${simDay} · ${formatTime(simMinute)} — ${serviceStatus()}`;
+  function updateStatusBar(){
+    const dayText = (window.TS?.dayText) || `Day ${simDay}`;
+    const timeText = (window.TS?.timeText) || formatTime(simMinute);
+    const serviceText = (window.TS?.serviceText) || serviceStatus();
+
+    const cityName = (window.TS?.cityName) || "Tutorial City";
+    const population = (window.TS?.population ?? 100000);
+    const goalPct = (window.TS?.goalPct ?? 5);
+    const goalDays = (window.TS?.goalDays ?? 30);
+
+    const left = `${dayText} · ${timeText} — ${serviceText}`;
+    const right = `${cityName} · Population ${Number(population).toLocaleString()} · Goal: ${goalPct}% for ${goalDays} days`;
+
+    const full = `${left} · ${right}`;
+    const el = document.getElementById("statusBar");
+    if(el){
+      el.textContent = full;
+      el.title = full;
     }
+  }
+
+  function updateClockLabel(){
+    window.TS = window.TS || {};
+    window.TS.dayText = `Day ${simDay}`;
+    window.TS.timeText = formatTime(simMinute);
+    window.TS.serviceText = serviceStatus();
+    updateStatusBar();
   }
 
   function resetDailyTallies(){
@@ -1088,8 +1120,10 @@
 
     $("#play").addEventListener("click", ()=>{ setSimRunning(!simRunning); });
     $("#jump").addEventListener("click", ()=>{ jumpToServiceStart(); });
-    $("#newmap").addEventListener("click", ()=>{ setSimRunning(false); resetRoutes(); rebuildAll(); resetSimulationState(); });
-    $("#reset").addEventListener("click", ()=>{ setSimRunning(false); resetRoutes(); rebuildAll(); resetSimulationState(); });
+    $("#newmap").addEventListener("click", ()=>{ setSimRunning(false); resetRoutes(); rebuildAll(); resetSimulationState(); updateStatusBar(); });
+    $("#reset").addEventListener("click", ()=>{ setSimRunning(false); resetRoutes(); rebuildAll(); resetSimulationState(); updateStatusBar(); });
+
+    updateStatusBar();
   }
 
   window.addEventListener("DOMContentLoaded", init);
