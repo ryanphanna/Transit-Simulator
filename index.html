@@ -67,6 +67,7 @@
     .hstack{display:flex; align-items:center; gap:8px; flex-wrap:wrap;}
     .stat{font-weight:700; color:#059669; font-size:28px;}
     .muted{color:#64748b; font-size:13px;}
+    .tag{ padding:2px 6px; border-radius:9999px; font-size:11px; background:#eef2ff; color:#4338ca; }
     .status-bar{
       text-align:center;
       font-size: 0.98rem;
@@ -125,7 +126,14 @@
     <div class="grid3">
       <aside class="col col-scroll card" id="leftCol">
         <div class="section"><div class="muted">Cash</div><div class="stat" id="cash">$5,000,000</div></div>
-        <div class="section"><div class="muted">Riders / hr</div><div id="rph">0</div></div>
+        <div class="section">
+          <div class="muted">Riders / hr</div>
+          <div style="display:flex; gap:10px; align-items:baseline;">
+            <div><strong id="liveRidersHr">0</strong> <span class="tag" id="liveStatusTag">paused</span></div>
+            <div class="muted">| projected: <span id="projRidersHr">0</span></div>
+          </div>
+          <div id="liveReason" class="muted" style="font-size:12px; margin-top:4px;"></div>
+        </div>
         <div class="section"><div class="muted">Vehicles in use</div><div id="veh">0 / 10 (Spare: 10)</div></div>
         <div class="section"><div class="muted">Daily money</div><div id="money">$0 – $0 = $0</div></div>
         <div class="section">
@@ -591,11 +599,64 @@
     updateEditingStatus();
     const route=routes.find(r=>r.id===id);
     drawCatchmentsForRoute(route);
+    updateRiderNumbersUI(route||null);
     if(tipEl) tipEl.style.display="none";
   }
 
   function routeStopCount(route){
     return route ? route.stops.length : 0;
+  }
+
+  function updateRiderNumbersUI(route){
+    const activeRoute = route || routes.find(r=>r.id===editingRouteId) || null;
+    const serviceHours = Math.max(1, (SERVICE_END-SERVICE_START)/60);
+    const served = activeRoute?.servedTripsPerDay || 0;
+    const demandHr = Math.round(served / serviceHours);
+    const veh = Math.max(0, Number(activeRoute?.vehicles)||0);
+    const loopMinutes = activeRoute?.loopMinutes;
+    const vehPerHr = (loopMinutes && veh>0) ? (veh / (loopMinutes/60)) : 0;
+    const capHr = Math.round(vehPerHr * 45);
+    const priceFactor = Math.max(0.5, Math.min(1.5, 1 - 0.10*((fare-2.0)/0.5)));
+    const projected = Math.floor(Math.min(demandHr, capHr) * priceFactor);
+
+    const live = Math.round(window.TS?.liveRidersPerHour || 0);
+
+    const liveEl = document.getElementById('liveRidersHr');
+    const projEl = document.getElementById('projRidersHr');
+    const projInline = document.getElementById('projRidersHrInline');
+    if(liveEl) liveEl.textContent = live.toString();
+    if(projEl) projEl.textContent = projected.toString();
+    if(projInline) projInline.textContent = projected.toString();
+
+    const tag = document.getElementById('liveStatusTag');
+    if(tag){
+      const paused = !!window.TS?.paused;
+      tag.textContent = paused ? 'paused' : 'live';
+      tag.style.background = paused ? '#fee2e2' : '#dcfce7';
+      tag.style.color = paused ? '#991b1b' : '#166534';
+    }
+
+    const reason = document.getElementById('liveReason');
+    if(!reason) return;
+
+    if(!activeRoute){
+      reason.textContent = '';
+      return;
+    }
+
+    let msgs = [];
+    if(window.TS?.paused) msgs.push('Simulation is paused — press ▶︎ Play.');
+    const clockMins = window.TS?.clockMins ?? 0;
+    const inService = clockMins >= SERVICE_START && clockMins < SERVICE_END;
+    if(!inService) msgs.push('Outside service hours.');
+    if(veh <= 0) msgs.push('No vehicles assigned to this route.');
+    if((activeRoute.stops?.length||0) < 2) msgs.push('Add at least two stops.');
+    if(served <= 0) msgs.push('This route doesn’t cover both ends (home + destination) of any trips yet.');
+    if(msgs.length === 0 && live === 0 && projected > 0){
+      msgs.push('No one has boarded yet — give it a minute for the first bus to reach stops.');
+    }
+
+    reason.textContent = (live===0) ? ('Why 0 right now: ' + msgs.join(' ')) : '';
   }
 
   function updateRouteMetrics(route){
@@ -646,11 +707,13 @@
     }
     lastVehiclesUsed=vehiclesUsed;
     lastRidershipHr=ridershipHr;
+    window.TS = window.TS || {};
+    window.TS.liveRidersPerHour = ridershipHr;
     const spare=Math.max(0, MAX_VEHICLES-vehiclesUsed);
     const vehLabel=$("#veh");
     if(vehLabel){ vehLabel.textContent=`${vehiclesUsed} / ${MAX_VEHICLES} (Spare: ${spare})`; }
-    const rph=$("#rph");
-    if(rph){ rph.textContent=ridershipHr.toLocaleString(); }
+    const active=editingRouteId ? routes.find(r=>r.id===editingRouteId) : null;
+    updateRiderNumbersUI(active||null);
   }
 
   function updateRouteBreakdownUI(route){
@@ -663,6 +726,7 @@
     const capHr = Math.round(vehPerHr * 45); // simple capacity
     const fareNow = fare;
     const priceFactor = Math.max(0.5, Math.min(1.5, 1 - 0.10*((fareNow-2.0)/0.5)));
+    const projected = Math.floor(Math.min(demandHr, capHr) * priceFactor);
 
     const container=document.getElementById("routeDetails");
     if(!container) return;
@@ -674,7 +738,7 @@
     })();
 
     box.innerHTML = `
-      <div><strong>Why riders/hr ≈ ${route.ridership.toLocaleString()}</strong></div>
+      <div><strong>Projected riders/hr = <span id="projRidersHrInline">${projected.toString()}</span></strong></div>
       <div>Served trips/day (both ends covered): <b>${served.toLocaleString()}</b></div>
       <div>Demand/hr = served ÷ ${serviceHours} = <b>${demandHr}</b></div>
       <div>Capacity/hr = (vehicles/loop hr) × 45 = <b>${vehPerHr.toFixed(1)}</b>×45 = <b>${capHr}</b></div>
@@ -876,7 +940,7 @@
     if(!active){
       const r = makeRoute();              // creates, selects, renders
       addStopToRoute(r, gx, gy);          // first stop
-      $("#coach") && ($("#coach").textContent="Great! Keep adding stops where homes and destinations overlap.");
+      $("#coach") && ($("#coach").textContent="Great! Keep adding stops where homes 🏠 and destinations overlap. Press ▶︎ Play to start service.");
       drawCatchmentsForRoute(r);
       return;
     }
@@ -1098,6 +1162,7 @@
     window.TS.dayText = `Day ${simDay}`;
     window.TS.timeText = formatTime(simMinute);
     window.TS.serviceText = serviceStatus();
+    window.TS.clockMins = simMinute;
     updateStatusBar();
   }
 
@@ -1128,6 +1193,8 @@
   function setSimRunning(next){
     if(simRunning===next) return;
     simRunning=next;
+    window.TS = window.TS || {};
+    window.TS.paused = !simRunning;
     updatePlayButton();
     updateClockLabel();
     if(simRunning){
@@ -1136,6 +1203,8 @@
     }else{
       stopSimTimer();
     }
+    const route=editingRouteId ? routes.find(r=>r.id===editingRouteId) : null;
+    updateRiderNumbersUI(route||null);
   }
 
   function setSpeed(mult){
@@ -1167,6 +1236,8 @@
     }
     updateClockLabel();
     updateFinanceUI();
+    const route=editingRouteId ? routes.find(r=>r.id===editingRouteId) : null;
+    updateRiderNumbersUI(route||null);
   }
 
   function resetSimulationState(){
@@ -1177,11 +1248,18 @@
     cash=BASE_CASH;
     fare=DEFAULT_FARE;
     simSpeed=1;
+    lastRidershipHr=0;
+    lastVehiclesUsed=0;
+    window.TS = window.TS || {};
+    window.TS.paused = true;
+    window.TS.liveRidersPerHour = 0;
     resetDailyTallies();
     updateFareDisplay();
     updatePlayButton();
     updateSpeedButtons();
     updateClockLabel();
+    const route=editingRouteId ? routes.find(r=>r.id===editingRouteId) : null;
+    updateRiderNumbersUI(route||null);
   }
 
   function jumpToServiceStart(){
@@ -1193,6 +1271,8 @@
     simMinute=SERVICE_START;
     updateClockLabel();
     updateFinanceUI();
+    const route=editingRouteId ? routes.find(r=>r.id===editingRouteId) : null;
+    updateRiderNumbersUI(route||null);
   }
 
   function updateFareDisplay(){
@@ -1204,7 +1284,13 @@
     const clamped=Math.min(FARE_MAX, Math.max(FARE_MIN, Math.round(value*100)/100));
     fare=clamped;
     updateFareDisplay();
-    if(editingRouteId){ const r=routes.find(x=>x.id===editingRouteId); if(r) updateRouteBreakdownUI(r); }
+    const r=editingRouteId ? routes.find(x=>x.id===editingRouteId) : null;
+    if(r){
+      updateRouteBreakdownUI(r);
+      updateRiderNumbersUI(r);
+    }else{
+      updateRiderNumbersUI(null);
+    }
   }
 
   function init(){
@@ -1288,7 +1374,7 @@
       if(e.ctrlKey || e.metaKey || e.altKey) return;
       if(e.key.toLowerCase()==="n"){ makeRoute(); coachEl && (coachEl.textContent="Click the map to add stops on your new route."); }
       else if(e.key.toLowerCase()==="h"){ helpMask && (helpMask.style.display="grid"); }
-      else if(e.key==="Escape"){ editingRouteId=null; renderRoutesPanel(); updateRouteDetails(); updateEditingStatus(); clearHalos(); tipEl && (tipEl.style.display="none"); }
+      else if(e.key==="Escape"){ editingRouteId=null; renderRoutesPanel(); updateRouteDetails(); updateEditingStatus(); clearHalos(); updateRiderNumbersUI(null); tipEl && (tipEl.style.display="none"); }
     });
 
     updateStatusBar();
