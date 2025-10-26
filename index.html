@@ -93,6 +93,12 @@
     .routeItem label { display:flex; align-items:center; gap:4px; font-size:12px; color:#475569; }
     .stopMarker { position:absolute; width:18px; height:18px; border-radius:50%; transform:translate(-50%,-50%); border:2px solid #ecfdf5; box-shadow:0 0 0 2px rgba(13,148,136,0.15); pointer-events:none; display:flex; align-items:center; justify-content:center; background:#059669; z-index:4; }
     .stopMarker .stopCore { width:6px; height:6px; border-radius:50%; background:#ecfdf5; box-shadow:0 0 3px rgba(15,23,42,0.25) inset; flex-shrink:0; }
+    .coach{ background:#ecfdf5; color:#065f46; border:1px solid #a7f3d0; border-radius:10px; padding:8px 12px; font-size:13px; }
+    .halo{ position:absolute; border-radius:50%; border:1px dashed rgba(16,185,129,.55); background:rgba(16,185,129,.10); pointer-events:none; transform:translate(-50%,-50%); }
+    .mapTip{ position:absolute; z-index:25; padding:6px 8px; background:#111827; color:#fff; border-radius:8px; font-size:12px; pointer-events:none; transform:translate(-50%,-100%); white-space:nowrap; display:none; }
+    .modalMask{ position:fixed; inset:0; background:rgba(2,6,23,.45); display:none; place-items:center; z-index:50; }
+    .modal{ background:#fff; width:min(680px,calc(100vw - 32px)); border-radius:14px; box-shadow:0 10px 30px rgba(2,6,23,.25); padding:18px; }
+    .modal h3{ margin:4px 0 8px; }
   </style>
 </head>
 <body>
@@ -109,6 +115,7 @@
     <div class="hstack" id="topbarRight">
       <button class="btn" id="jump">⏭ Jump</button>
       <button class="btn" id="settings">⚙ Settings</button>
+      <button class="btn" id="helpBtn">❔ Help</button>
       <button class="btn" id="reset">⟲ Reset</button>
       <button class="btn" id="newmap">🗺️ New Map</button>
     </div>
@@ -131,6 +138,9 @@
         <div class="center-card">
           <div class="center-head">
             <!-- inside the center header above the map -->
+            <div id="coach" class="coach" role="status" aria-live="polite">
+              Click the map to create your first route. Add stops where <b>homes 🏠</b> and <b>destinations</b> overlap.
+            </div>
             <div id="statusBar" class="status-bar" aria-live="polite"></div>
           </div>
           <div class="map-wrap"><div id="mapSquare"><div class="gridLines"></div></div></div>
@@ -142,7 +152,7 @@
         <div class="section" id="routesPanel">
           <div class="hstack" style="justify-content:space-between;">
             <strong>Routes</strong>
-            <button class="btn" id="addRoute">＋ Route</button>
+            <button class="btn" id="addRoute">＋ Route (N)</button>
           </div>
           <div id="routeList" class="muted" style="margin-top:8px;">No routes yet. Add one to begin planning.</div>
           <div id="routeDetails" class="muted" style="margin-top:12px;">
@@ -168,6 +178,22 @@
       </aside>
     </div>
   </main>
+
+  <div id="helpMask" class="modalMask">
+    <div class="modal">
+      <h3>How to Play (Quick)</h3>
+      <ol>
+        <li><b>Click the map</b> to create a route and place a stop.</li>
+        <li>Add stops so <b>homes 🏠</b> and <b>destinations</b> (🛍️ 🏫 🏢 🍔 🎡 🏥) are both within ~1 tile of some stop on the same route.</li>
+        <li>Keep the loop <b>short</b>; assign more vehicles to improve headway if crowded.</li>
+        <li>Riders/hr ≈ min(<i>demand/hr</i>, <i>capacity/hr</i>) × <i>price factor</i>.</li>
+      </ol>
+      <p style="font-size:12px;color:#64748b">Tips: Press <b>N</b> for a new route, <b>H</b> for help, <b>Esc</b> to stop editing a route.</p>
+      <div style="text-align:right; margin-top:10px;">
+        <button class="btn" id="closeHelp">Close</button>
+      </div>
+    </div>
+  </div>
 
   <script>
   const $ = s=>document.querySelector(s), $$ = s=>[...document.querySelectorAll(s)];
@@ -227,8 +253,22 @@
     map.style.width=size+"px"; map.style.height=size+"px";
     map.querySelector(".gridLines").style.backgroundSize=cell+"px "+cell+"px";
     map.dataset.cell=cell;
+    ensureMapOverlays();
     repositionStops();
     renderRouteOverlays();
+  }
+
+  function ensureMapOverlays(){
+    const map=$("#mapSquare");
+    if(!haloLayer){
+      haloLayer=document.createElement("div");
+      haloLayer.style.position="absolute";
+      haloLayer.style.inset="0";
+      haloLayer.style.pointerEvents="none";
+      haloLayer.style.zIndex="2";
+      map.appendChild(haloLayer);
+    }
+    if(!tipEl){ tipEl=document.createElement("div"); tipEl.className="mapTip"; map.appendChild(tipEl); }
   }
 
   // --- STATE
@@ -240,6 +280,7 @@
   let editingRouteId=null;
   let routeSeq=1;
   let routeOverlayLayer=null;
+  let haloLayer=null, tipEl=null;
 
   // --- helpers
   function addTile(emoji,gx,gy,scale=1){
@@ -270,6 +311,43 @@
 
   function clamp(min,max,value){
     return Math.min(max, Math.max(min, value));
+  }
+
+  function cellSize(){ return parseInt($("#mapSquare").dataset.cell||"24",10); }
+  function tileCenter(gx,gy){ const c=cellSize(); return {x:gx*c+c/2,y:gy*c+c/2}; }
+
+  function clearHalos(){ if(haloLayer) haloLayer.innerHTML=""; }
+  function drawCatchmentsForRoute(route){
+    ensureMapOverlays(); clearHalos();
+    if(!route) return;
+    const c=cellSize(), r=(1+0.5)*c*2; // catchment radius ~1 tile
+    const seen=new Set();
+    for(const sid of route.stops){
+      const s=stopIdToCoords(sid); if(!s) continue;
+      const k=s.x+","+s.y; if(seen.has(k)) continue; seen.add(k);
+      const p=tileCenter(s.x,s.y);
+      const d=document.createElement("div");
+      d.className="halo";
+      d.style.width=r+"px"; d.style.height=r+"px";
+      d.style.left=p.x+"px"; d.style.top=p.y+"px";
+      haloLayer.appendChild(d);
+    }
+  }
+
+  function computeServedTripsForTemp(route, gx, gy){
+    const key=stopKey(gx,gy);
+    const existed=stops.has(key);
+    const temp = { ...route, stops:[...route.stops] };
+    const stop=ensureStop(gx,gy); // ensures marker but we’ll revert usage
+    const id=stop.id;
+    if(!temp.stops.includes(id)) temp.stops.push(id);
+    updateRouteMetrics(temp);
+    if(!existed){
+      removeStopMarkerIfUnused(stop);
+    }
+    // revert temp marker usage so we don't leak markers
+    stop.usage=(stop.usage||0);
+    return temp.servedTripsPerDay||0;
   }
 
   function stopIdToCoords(stopId){
@@ -486,6 +564,8 @@
     routeSeq=1;
     resetAllStops();
     renderRoutesPanel();
+    clearHalos();
+    if(tipEl) tipEl.style.display="none";
     updateRouteStats();
     updateRouteDetails();
     updateEditingStatus();
@@ -509,6 +589,9 @@
     renderRoutesPanel();
     updateRouteDetails();
     updateEditingStatus();
+    const route=routes.find(r=>r.id===id);
+    drawCatchmentsForRoute(route);
+    if(tipEl) tipEl.style.display="none";
   }
 
   function routeStopCount(route){
@@ -557,6 +640,7 @@
     let vehiclesUsed=0, ridershipHr=0;
     for(const route of routes){
       updateRouteMetrics(route);
+      if(route.id===editingRouteId) updateRouteBreakdownUI(route);
       vehiclesUsed+=route.vehicles;
       ridershipHr+=route.ridership;
     }
@@ -569,12 +653,44 @@
     if(rph){ rph.textContent=ridershipHr.toLocaleString(); }
   }
 
+  function updateRouteBreakdownUI(route){
+    if(!route) return;
+    const serviceHours = Math.max(1, (SERVICE_END-SERVICE_START)/60);
+    const served = route.servedTripsPerDay||0;
+    const demandHr = Math.round(served/serviceHours);
+    const veh = Math.max(0, Number(route.vehicles)||0);
+    const vehPerHr = veh>0 ? (veh / (route.loopMinutes/60)) : 0;
+    const capHr = Math.round(vehPerHr * 45); // simple capacity
+    const fareNow = fare;
+    const priceFactor = Math.max(0.5, Math.min(1.5, 1 - 0.10*((fareNow-2.0)/0.5)));
+
+    const container=document.getElementById("routeDetails");
+    if(!container) return;
+    const box = document.getElementById("routeBreakdown") || (() => {
+      const el=document.createElement("div");
+      el.id="routeBreakdown"; el.className="muted"; el.style.marginTop="8px";
+      container.appendChild(el);
+      return el;
+    })();
+
+    box.innerHTML = `
+      <div><strong>Why riders/hr ≈ ${route.ridership.toLocaleString()}</strong></div>
+      <div>Served trips/day (both ends covered): <b>${served.toLocaleString()}</b></div>
+      <div>Demand/hr = served ÷ ${serviceHours} = <b>${demandHr}</b></div>
+      <div>Capacity/hr = (vehicles/loop hr) × 45 = <b>${vehPerHr.toFixed(1)}</b>×45 = <b>${capHr}</b></div>
+      <div>Price factor (@ $${fareNow.toFixed(2)}): <b>${priceFactor.toFixed(2)}</b></div>
+      <div>Riders/hr ≈ min(demand, capacity) × price = <b>${Math.min(demandHr, capHr)}</b> × ${priceFactor.toFixed(2)}</div>
+    `;
+  }
+
   function updateRouteDetails(){
     const details=$("#routeDetails");
     if(!details) return;
     const route=routes.find(r=>r.id===editingRouteId);
     if(!route){
       details.innerHTML='Select a route to edit its color, vehicles, and stops.';
+      const breakdown=document.getElementById("routeBreakdown");
+      if(breakdown) breakdown.remove();
       return;
     }
     const uniqueStops=new Set(route.stops).size;
@@ -587,6 +703,7 @@
       <div>Loop time: ${loopLabel} min · Headway: ${headwayLabel}</div>
       <div>Estimated riders / hr (frequency-adjusted): ${route.ridership.toLocaleString()}</div>
       <div style="margin-top:6px;">Click the map to add stops. Shift-click to remove the stop for this tile.</div>`;
+    updateRouteBreakdownUI(route);
   }
 
   function updateEditingStatus(){
@@ -716,6 +833,7 @@
     updateRouteDetails();
     renderRoutesPanel();
     renderRouteOverlays();
+    drawCatchmentsForRoute(route);
   }
 
   function removeStopFromRoute(route,gx,gy){
@@ -734,34 +852,38 @@
       updateRouteDetails();
       renderRoutesPanel();
       renderRouteOverlays();
-    }
-  }
-
-  function handleStopEdit(e){
-    const route=routes.find(r=>r.id===editingRouteId);
-    if(!route) return;
-    const map=$("#mapSquare");
-    const rect=map.getBoundingClientRect();
-    const cell=parseInt(map.dataset.cell||"24",10);
-    const mx=e.clientX-rect.left;
-    const my=e.clientY-rect.top;
-    const gx=Math.max(0, Math.min(GRID-1, Math.floor(mx/cell)));
-    const gy=Math.max(0, Math.min(GRID-1, Math.floor(my/cell)));
-    if(e.shiftKey){
-      removeStopFromRoute(route,gx,gy);
-    }else{
-      addStopToRoute(route,gx,gy);
+      drawCatchmentsForRoute(route);
     }
   }
 
   function mapClickRouter(e){
-    if(editingRouteId){
-      handleStopEdit(e);
+    const map=$("#mapSquare");
+    if(!map) return;
+    const rect=map.getBoundingClientRect();
+    const c=cellSize();
+    const gx=Math.max(0, Math.min(GRID-1, Math.floor((e.clientX-rect.left)/c)));
+    const gy=Math.max(0, Math.min(GRID-1, Math.floor((e.clientY-rect.top )/c)));
+
+    if(inspectorOn && !editingRouteId){
+      handleInspectorClick(e);
       return;
     }
-    if(inspectorOn){
-      handleInspectorClick(e);
+
+    // If a route is selected -> edit that route (add/remove with Shift)
+    const active=routes.find(r=>r.id===editingRouteId);
+
+    // If no routes or none selected, first click creates a route and places the first stop
+    if(!active){
+      const r = makeRoute();              // creates, selects, renders
+      addStopToRoute(r, gx, gy);          // first stop
+      $("#coach") && ($("#coach").textContent="Great! Keep adding stops where homes and destinations overlap.");
+      drawCatchmentsForRoute(r);
+      return;
     }
+
+    if(e.shiftKey){ removeStopFromRoute(active, gx, gy); }
+    else{ addStopToRoute(active, gx, gy); }
+    drawCatchmentsForRoute(active);
   }
 
   // --- city generation: homes + destinations
@@ -1082,11 +1204,23 @@
     const clamped=Math.min(FARE_MAX, Math.max(FARE_MIN, Math.round(value*100)/100));
     fare=clamped;
     updateFareDisplay();
+    if(editingRouteId){ const r=routes.find(x=>x.id===editingRouteId); if(r) updateRouteBreakdownUI(r); }
   }
 
   function init(){
     rebuildAll();
     resetSimulationState();
+    const coachEl=$("#coach");
+    const helpMask=$("#helpMask");
+    const helpBtn=$("#helpBtn");
+    const closeHelp=$("#closeHelp");
+    const mapEl=$("#mapSquare");
+    const addRouteBtn=$("#addRoute");
+
+    coachEl && (coachEl.textContent = "Click the map to create your first route. Aim for tiles where homes 🏠 and destinations overlap.");
+
+    if(helpBtn && helpMask){ helpBtn.onclick=()=>{ helpMask.style.display="grid"; }; }
+    if(closeHelp && helpMask){ closeHelp.onclick=()=>{ helpMask.style.display="none"; }; }
 
     // controls
     $("#fareMinus").onclick=()=>{ setFare(fare-FARE_STEP); };
@@ -1094,17 +1228,42 @@
     window.addEventListener("resize",()=>{
       sizeMap();
       layoutTiles();
+      drawCatchmentsForRoute(routes.find(r=>r.id===editingRouteId));
       renderHeat();
       if(inspectorOn){
         if(inspectorLayer) inspectorLayer.innerHTML="";
       }
     });
 
-    $("#mapSquare").addEventListener("click", mapClickRouter);
-    $("#addRoute").addEventListener("click", ()=>{
-      makeRoute();
-      updateEditingStatus();
-    });
+    if(mapEl){
+      mapEl.addEventListener("click", mapClickRouter);
+      mapEl.addEventListener("mousemove",(e)=>{
+        if(!editingRouteId) return;
+        const r=routes.find(x=>x.id===editingRouteId); if(!r) return;
+        ensureMapOverlays();
+        const rect=mapEl.getBoundingClientRect(), c=cellSize();
+        const gx=Math.max(0, Math.min(GRID-1, Math.floor((e.clientX-rect.left)/c)));
+        const gy=Math.max(0, Math.min(GRID-1, Math.floor((e.clientY-rect.top )/c)));
+        const base = r.servedTripsPerDay||0;
+        const withStop = computeServedTripsForTemp(r, gx, gy);
+        const delta = Math.max(0, withStop - base);
+        const pos = tileCenter(gx,gy);
+        if(!tipEl) return;
+        tipEl.style.left=pos.x+"px";
+        tipEl.style.top =pos.y+"px";
+        tipEl.textContent = delta>0 ? `Add stop: +${delta} trips/day` : `Add stop`;
+        tipEl.style.display="block";
+      });
+      mapEl.addEventListener("mouseleave",()=>{ tipEl && (tipEl.style.display="none"); });
+    }
+    if(addRouteBtn){
+      addRouteBtn.addEventListener("click", ()=>{
+        const route=makeRoute();
+        updateEditingStatus();
+        drawCatchmentsForRoute(route);
+        coachEl && (coachEl.textContent="Click the map to add stops on your new route.");
+      });
+    }
 
     // Demand toggles
     $("#toggleDemandHeat").addEventListener("change",(e)=>{ heatOn=e.target.checked; renderHeat(); });
@@ -1120,8 +1279,17 @@
 
     $("#play").addEventListener("click", ()=>{ setSimRunning(!simRunning); });
     $("#jump").addEventListener("click", ()=>{ jumpToServiceStart(); });
-    $("#newmap").addEventListener("click", ()=>{ setSimRunning(false); resetRoutes(); rebuildAll(); resetSimulationState(); updateStatusBar(); });
-    $("#reset").addEventListener("click", ()=>{ setSimRunning(false); resetRoutes(); rebuildAll(); resetSimulationState(); updateStatusBar(); });
+    $("#newmap").addEventListener("click", ()=>{ setSimRunning(false); resetRoutes(); rebuildAll(); resetSimulationState(); updateStatusBar(); coachEl && (coachEl.textContent = "Click the map to create your first route. Aim for tiles where homes 🏠 and destinations overlap."); helpMask && (helpMask.style.display="none"); });
+    $("#reset").addEventListener("click", ()=>{ setSimRunning(false); resetRoutes(); rebuildAll(); resetSimulationState(); updateStatusBar(); coachEl && (coachEl.textContent = "Click the map to create your first route. Aim for tiles where homes 🏠 and destinations overlap."); helpMask && (helpMask.style.display="none"); });
+
+    window.addEventListener("keydown",(e)=>{
+      const activeEl=document.activeElement;
+      if(activeEl && (activeEl.tagName==='INPUT' || activeEl.tagName==='TEXTAREA' || activeEl.isContentEditable)) return;
+      if(e.ctrlKey || e.metaKey || e.altKey) return;
+      if(e.key.toLowerCase()==="n"){ makeRoute(); coachEl && (coachEl.textContent="Click the map to add stops on your new route."); }
+      else if(e.key.toLowerCase()==="h"){ helpMask && (helpMask.style.display="grid"); }
+      else if(e.key==="Escape"){ editingRouteId=null; renderRoutesPanel(); updateRouteDetails(); updateEditingStatus(); clearHalos(); tipEl && (tipEl.style.display="none"); }
+    });
 
     updateStatusBar();
   }
