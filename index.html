@@ -52,7 +52,7 @@
     .col{min-height:0; height:100%;}
     .col-scroll{overflow: auto;}
     .col-center{overflow: hidden; display:flex;}
-    .center-card{display:flex; flex-direction:column; width:100%;}
+    .center-card{display:flex; flex-direction:column; width:100%; position:relative;}
     .center-head,.center-foot{padding:12px 14px; border-bottom:1px solid #e9f4ef;}
     .center-head{display:flex; flex-direction:column; gap:4px;}
     .center-foot{border-top:1px solid #e9f4ef; border-bottom:0;}
@@ -117,6 +117,25 @@
     .stopMarker { position:absolute; width:18px; height:18px; border-radius:50%; transform:translate(-50%,-50%); border:2px solid #ecfdf5; box-shadow:0 0 0 2px rgba(13,148,136,0.15); pointer-events:none; display:flex; align-items:center; justify-content:center; background:#059669; z-index:4; }
     .stopMarker .stopCore { width:6px; height:6px; border-radius:50%; background:#ecfdf5; box-shadow:0 0 3px rgba(15,23,42,0.25) inset; flex-shrink:0; }
     .coach{ background:#ecfdf5; color:#065f46; border:1px solid #a7f3d0; border-radius:10px; padding:8px 12px; font-size:13px; }
+    .coach-tip {
+      position: absolute;
+      top: 8px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #ecfdf5;
+      border: 1px solid #a7f3d0;
+      color: #064e3b;
+      border-radius: 10px;
+      padding: 8px 14px;
+      font-size: 13px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+      opacity: 0;
+      transition: opacity .4s;
+      pointer-events: none;
+      max-width: 600px;
+      text-align: center;
+    }
+    .coach-tip.visible { opacity: 1; }
     .halo{ position:absolute; border-radius:50%; border:1px dashed rgba(16,185,129,.55); background:rgba(16,185,129,.10); pointer-events:none; transform:translate(-50%,-50%); }
     .mapTip{ position:absolute; z-index:25; padding:6px 8px; background:#111827; color:#fff; border-radius:8px; font-size:12px; pointer-events:none; transform:translate(-50%,-100%); white-space:nowrap; display:none; }
     .modalMask{ position:fixed; inset:0; background:rgba(2,6,23,.45); display:none; place-items:center; z-index:50; }
@@ -176,6 +195,7 @@
             </div>
             <div id="statusBar" class="status-bar" aria-live="polite"></div>
           </div>
+          <div id="coachTip" class="coach-tip"></div>
           <div class="map-wrap"><div id="mapSquare"><div class="gridLines"></div></div></div>
           <div class="center-foot muted">Select a route to begin placing stops. Shift-click tiles to remove stops from the active route.</div>
         </div>
@@ -315,6 +335,7 @@
   let routeOverlayLayer=null;
   let haloLayer=null, tipEl=null;
   const seenStatusBanners=new Set();
+  let coachDayTipTriggered=false;
 
   // --- helpers
   function addTile(emoji,gx,gy,scale=1){
@@ -349,6 +370,39 @@
 
   function cellSize(){ return parseInt($("#mapSquare").dataset.cell||"24",10); }
   function tileCenter(gx,gy){ const c=cellSize(); return {x:gx*c+c/2,y:gy*c+c/2}; }
+
+  function nearbyTiles(gx,gy,radius=1){
+    const results=[];
+    const seen=new Set();
+    const r=Math.max(0, Math.ceil(radius));
+    for(let dx=-r; dx<=r; dx++){
+      for(let dy=-r; dy<=r; dy++){
+        const x=gx+dx, y=gy+dy;
+        if(x<0 || y<0 || x>=GRID || y>=GRID) continue;
+        if(Math.hypot(dx,dy) > radius + 0.01) continue;
+        const key=`${x},${y}`;
+        if(seen.has(key)) continue;
+        seen.add(key);
+        results.push({x,y});
+      }
+    }
+    return results;
+  }
+
+  function tileAt(gx,gy){
+    for(const h of homes){ if(h.x===gx && h.y===gy) return {emoji:'🏠'}; }
+    for(const p of pois){ if(p.x===gx && p.y===gy) return {emoji:p.type}; }
+    return null;
+  }
+
+  function showCoachTip(msg, ms=4000){
+    const tip=document.getElementById('coachTip');
+    if(!tip) return;
+    tip.textContent=msg;
+    tip.classList.add('visible');
+    clearTimeout(tip._t);
+    tip._t=setTimeout(()=>tip.classList.remove('visible'), ms);
+  }
 
   function priceFactorForFare(value=fare){
     const baseline = 1 - 0.10*((value-2.0)/0.5);
@@ -624,6 +678,7 @@
     updateRouteDetails();
     updateEditingStatus();
     seenStatusBanners.clear();
+    coachDayTipTriggered=false;
   }
 
   function makeRoute(){
@@ -728,6 +783,22 @@
 
     route.projectedHr=0;
 
+    const countedTiles=new Set();
+    let homesCount=0, destsCount=0;
+    for(const c of coords){
+      const nearby=nearbyTiles(c.x, c.y, 1);
+      for(const t of nearby){
+        const key=`${t.x},${t.y}`;
+        if(countedTiles.has(key)) continue;
+        countedTiles.add(key);
+        const tile=tileAt(t.x,t.y);
+        if(tile?.emoji==='🏠') homesCount++;
+        else if(['🛍️','🏫','🏢','🍔','🎡','🏥'].includes(tile?.emoji)) destsCount++;
+      }
+    }
+    route.coveredHomes=homesCount;
+    route.coveredDests=destsCount;
+
     if(coords.length<2){
       route.servedTripsPerDay=0;
       return;
@@ -758,6 +829,44 @@
     const priceFactor = priceFactorForFare();
     const projectedHr = Math.min(hourlyDemand, capHr) * waitFactor * priceFactor;
     route.projectedHr = Number.isFinite(projectedHr) && projectedHr>0 ? projectedHr : 0;
+  }
+
+  function analyzeRoute(route){
+    if(!route) return;
+    const served=route.servedTripsPerDay || 0;
+    const homes=route.coveredHomes || 0;
+    const dests=route.coveredDests || 0;
+    const headway=route.headway ?? Infinity;
+    const veh=route.vehicles || 0;
+    const ridership=Math.max(route.projectedHr||0, route.liveRidersThisHour||0);
+
+    if(homes===0 && dests===0){
+      showCoachTip("This route doesn't reach anyone. Try hitting a few 🏠 or 🛍️ squares.");
+      return;
+    }
+    if(homes>0 && dests===0){
+      showCoachTip("People like going other places too lol. Add a stop near a shop, job, or school.");
+      return;
+    }
+    if(dests>0 && homes===0){
+      showCoachTip("Plenty of places to go, but no one to go there from. Add some homes 🏠.");
+      return;
+    }
+    if(served===0){
+      showCoachTip("You’re close! Stops might be too far apart to cover both ends of a trip.");
+      return;
+    }
+    if(headway>20 && veh<=1){
+      showCoachTip("Service every 20+ minutes? Even buses nap at that point. Add another vehicle.");
+      return;
+    }
+    if(headway<6 && veh>4){
+      showCoachTip("Frequent service! Might be time to boost ridership or extend the route.");
+      return;
+    }
+    if(served>0 && ridership>0){
+      showCoachTip("Nice. You’ve got a working line. Keep it balanced between homes and destinations.");
+    }
   }
 
   function updateRouteStats(){
@@ -840,6 +949,7 @@
     updateRouteStats();
     updateRouteDetails();
     renderRoutesPanel();
+    analyzeRoute(route);
   }
 
   function showShortenLoopTips(route){
@@ -1130,6 +1240,7 @@
         updateRouteStats();
         updateRouteDetails();
         renderRoutesPanel();
+        analyzeRoute(route);
       });
       vehiclesLabel.appendChild(vehiclesInput);
 
@@ -1163,6 +1274,7 @@
     stop.routes.add(route.id);
     updateStopColors(stop);
     updateRouteMetrics(route);
+    analyzeRoute(route);
     updateRouteStats();
     updateRouteDetails();
     renderRoutesPanel();
@@ -1182,6 +1294,7 @@
       updateStopColors(stop);
       removeStopMarkerIfUnused(stop);
       updateRouteMetrics(route);
+      analyzeRoute(route);
       updateRouteStats();
       updateRouteDetails();
       renderRoutesPanel();
@@ -1534,6 +1647,10 @@
     cash = Math.round((cash + revenue - expenses)*100)/100;
 
     simMinute++;
+    if(!coachDayTipTriggered && routes.length){
+      coachDayTipTriggered=true;
+      setTimeout(()=>{ for(const route of routes){ analyzeRoute(route); } }, 0);
+    }
     if(simMinute>=MINUTES_PER_DAY){
       simMinute=0;
       simDay++;
@@ -1575,6 +1692,7 @@
     updateSpeedButtons();
     updateClockLabel();
     seenStatusBanners.clear();
+    coachDayTipTriggered=false;
     for(const route of routes){
       route.riderBank=0;
       route.liveRidersThisHour=0;
@@ -1613,6 +1731,9 @@
     const r=editingRouteId ? routes.find(x=>x.id===editingRouteId) : null;
     if(r){
       updateRouteDetails();
+      analyzeRoute(r);
+    }else{
+      for(const route of routes){ analyzeRoute(route); }
     }
   }
 
