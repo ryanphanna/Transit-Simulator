@@ -85,6 +85,28 @@
     .odLine { position:absolute; inset:0; pointer-events:none; z-index:5; }
     .odLine svg { overflow:visible; }
     .badge { display:inline-block; padding:2px 8px; border-radius:9999px; background:#fee2e2; color:#991b1b; font-size:12px; font-weight:600; }
+    .status-chip{display:inline-flex; align-items:center; gap:8px; border-radius:9999px; padding:4px 10px; font-size:12px; font-weight:600; background:#f1f5f9; color:#0f172a; margin-top:8px;}
+    .status-chip[data-state="ok"]{background:#dcfce7; color:#166534;}
+    .status-chip[data-state="warn"]{background:#fee2e2; color:#991b1b;}
+    .status-chip button{pointer-events:auto;}
+    .chip-actions{display:flex; align-items:center; gap:6px;}
+    .chip-tip{font-weight:500; font-size:11px; color:#475569;}
+    .chip-secondary{font-weight:400;}
+    .chip-actions .btn{height:26px; padding:0 8px; font-size:12px;}
+    .chip-actions .btn.secondary{background:#fff7ed; border-color:#fb923c; color:#c2410c;}
+    #bannerHost{position:fixed; top:calc(var(--topbar-h) + 8px); left:50%; transform:translateX(-50%); z-index:30; display:flex; flex-direction:column; gap:8px; align-items:center; pointer-events:none;}
+    .banner{pointer-events:auto; background:#0f172a; color:#f8fafc; padding:10px 16px; border-radius:12px; box-shadow:0 10px 30px rgba(15,23,42,0.25); display:flex; flex-wrap:wrap; align-items:center; gap:12px; font-size:13px;}
+    .banner[data-state="warn"]{background:#991b1b;}
+    .banner button{height:28px; padding:0 12px; border-radius:9999px; border:none; background:#f8fafc; color:#0f172a; cursor:pointer; font-weight:600;}
+    .banner button.secondary{background:rgba(248,250,252,0.15); color:#f8fafc; border:1px solid rgba(248,250,252,0.25);}
+    .banner.fade{opacity:0; transition:opacity 0.3s ease;}
+    #toastHost{position:fixed; bottom:24px; left:50%; transform:translateX(-50%); z-index:40; display:flex; flex-direction:column; gap:8px; align-items:center; pointer-events:none;}
+    .toast{pointer-events:auto; background:#111827; color:#f8fafc; padding:10px 16px; border-radius:12px; box-shadow:0 10px 25px rgba(15,23,42,0.3); font-size:13px; display:flex; flex-direction:column; gap:4px; min-width:220px;}
+    .toast strong{font-weight:700;}
+    .toast button{align-self:flex-start; margin-top:4px; height:26px; padding:0 10px; border-radius:8px; border:none; background:#22c55e; color:#064e3b; font-weight:600; cursor:pointer;}
+    .toast.fade{opacity:0; transition:opacity 0.3s ease;}
+    .segment-hint{position:absolute; transform:translate(-50%,-50%); border-radius:50%; border:2px solid rgba(245,158,11,0.9); box-shadow:0 0 12px rgba(245,158,11,0.5); width:60px; height:60px; pointer-events:none; opacity:0; animation:hint-pop 2s ease-out forwards;}
+    @keyframes hint-pop{0%{opacity:0; transform:translate(-50%,-50%) scale(0.8);}20%{opacity:1; transform:translate(-50%,-50%) scale(1);}80%{opacity:1;}100%{opacity:0; transform:translate(-50%,-50%) scale(1.2);}}
     .routeItem { background:rgba(255,255,255,0.9); border:1px solid #d7ece3; border-radius:10px; padding:10px; margin-top:8px; cursor:pointer; transition:box-shadow 0.2s, border-color 0.2s; }
     .routeItem.active { border-color:#34d399; box-shadow:0 0 0 2px rgba(52,211,153,0.25); }
     .routeItem .routeTitle { display:flex; align-items:center; justify-content:space-between; font-weight:600; color:#0f172a; }
@@ -122,6 +144,9 @@
     </div>
   </header>
 
+  <div id="bannerHost" aria-live="polite"></div>
+  <div id="toastHost" aria-live="polite"></div>
+
   <main id="viewport">
     <div class="grid3">
       <aside class="col col-scroll card" id="leftCol">
@@ -130,7 +155,7 @@
           <div class="muted">Riders / hr</div>
           <div style="display:flex; gap:10px; align-items:baseline;">
             <div><strong id="liveRidersHr">0</strong> <span class="tag" id="liveStatusTag">paused</span></div>
-            <div class="muted">| projected: <span id="projRidersHr">0</span></div>
+            <div class="muted">| projected: <span id="projRidersHr">0</span> <span class="muted">/ hr</span></div>
           </div>
           <div id="liveReason" class="muted" style="font-size:12px; margin-top:4px;"></div>
         </div>
@@ -284,11 +309,12 @@
   let od=[]; // list of {ox,oy,dx,dy,tripsPerDay,type,dist}
   let inspectorOn=false, heatOn=false;
   let stops=new Map(); // key "x,y" -> {id,x,y,el,usage}
-  let routes=[]; // list of {id,name,color,vehicles,stops:[],ridership}
+  let routes=[]; // list of {id,name,color,vehicles,stops:[],projectedHr}
   let editingRouteId=null;
   let routeSeq=1;
   let routeOverlayLayer=null;
   let haloLayer=null, tipEl=null;
+  const seenStatusBanners=new Set();
 
   // --- helpers
   function addTile(emoji,gx,gy,scale=1){
@@ -323,6 +349,26 @@
 
   function cellSize(){ return parseInt($("#mapSquare").dataset.cell||"24",10); }
   function tileCenter(gx,gy){ const c=cellSize(); return {x:gx*c+c/2,y:gy*c+c/2}; }
+
+  function priceFactorForFare(value=fare){
+    const baseline = 1 - 0.10*((value-2.0)/0.5);
+    return clamp(0.5, 1.5, baseline);
+  }
+
+  function formatRidersHr(hr){
+    if(!isFinite(hr) || hr <= 0) return '0';
+    if(hr < 0.5) return '0';
+    if(hr < 1) return '≈1';
+    return String(Math.round(hr));
+  }
+
+  function routeHealth(route){
+    const hasOD = ((route?.servedTripsPerDay)||0) > 0;
+    const headwayOk = (route?.headway || Infinity) <= 12;
+    if(!hasOD) return 'NO_OD';
+    if(!headwayOk) return 'LONG_HEADWAY';
+    return 'OK';
+  }
 
   function clearHalos(){ if(haloLayer) haloLayer.innerHTML=""; }
   function drawCatchmentsForRoute(route){
@@ -577,13 +623,14 @@
     updateRouteStats();
     updateRouteDetails();
     updateEditingStatus();
+    seenStatusBanners.clear();
   }
 
   function makeRoute(){
     const id=`r${routeSeq++}`;
     const colors=['#1d4ed8','#dc2626','#047857','#9333ea','#f59e0b','#0891b2'];
     const color=colors[(routes.length)%colors.length];
-    const route={id,name:`Route ${routes.length+1}`,color,vehicles:1,stops:[],ridership:0,loopMinutes:MIN_LOOP_MINUTES,headway:Infinity,servedTripsPerDay:0};
+    const route={id,name:`Route ${routes.length+1}`,color,vehicles:1,stops:[],loopMinutes:MIN_LOOP_MINUTES,headway:Infinity,servedTripsPerDay:0,projectedHr:0,liveRidersThisHour:0,lastHealth:'NO_OD',connectionToastShown:false,suggestedVehicleToast:false,firstRidersToastShown:false};
     routes.push(route);
     selectRoute(id);
     renderRoutesPanel();
@@ -609,24 +656,31 @@
 
   function updateRiderNumbersUI(route){
     const activeRoute = route || routes.find(r=>r.id===editingRouteId) || null;
-    const serviceHours = Math.max(1, (SERVICE_END-SERVICE_START)/60);
-    const served = activeRoute?.servedTripsPerDay || 0;
-    const demandHr = Math.round(served / serviceHours);
-    const veh = Math.max(0, Number(activeRoute?.vehicles)||0);
-    const loopMinutes = activeRoute?.loopMinutes;
-    const vehPerHr = (loopMinutes && veh>0) ? (veh / (loopMinutes/60)) : 0;
-    const capHr = Math.round(vehPerHr * 45);
-    const priceFactor = Math.max(0.5, Math.min(1.5, 1 - 0.10*((fare-2.0)/0.5)));
-    const projected = Math.floor(Math.min(demandHr, capHr) * priceFactor);
-
-    const live = Math.round(window.TS?.liveRidersPerHour || 0);
+    const liveTotal = Math.round(window.TS?.liveRidersPerHour || 0);
+    const routeLive = Math.round(activeRoute?.liveRidersThisHour || 0);
+    const projectedTotal = window.TS?.projectedRidersPerHour ?? 0;
 
     const liveEl = document.getElementById('liveRidersHr');
     const projEl = document.getElementById('projRidersHr');
     const projInline = document.getElementById('projRidersHrInline');
-    if(liveEl) liveEl.textContent = live.toString();
-    if(projEl) projEl.textContent = projected.toString();
-    if(projInline) projInline.textContent = projected.toString();
+    const status = activeRoute ? routeHealth(activeRoute) : null;
+    const liveDisplay = activeRoute ? routeLive : liveTotal;
+    if(liveEl) liveEl.textContent = liveDisplay.toLocaleString();
+    if(projEl){
+      if(activeRoute){
+        const projectedDisplay = (activeRoute.projectedHr>0 || status==='OK') ? formatRidersHr(activeRoute.projectedHr||0) : '—';
+        projEl.textContent = projectedDisplay;
+      }else{
+        projEl.textContent = formatRidersHr(projectedTotal);
+      }
+    }
+
+    if(projInline && activeRoute){
+      const label = (activeRoute.projectedHr>0 || status==='OK') ? formatRidersHr(activeRoute.projectedHr||0) : '—';
+      projInline.textContent = label;
+    }else if(projInline){
+      projInline.textContent = formatRidersHr(projectedTotal);
+    }
 
     const tag = document.getElementById('liveStatusTag');
     if(tag){
@@ -644,19 +698,24 @@
       return;
     }
 
-    let msgs = [];
-    if(window.TS?.paused) msgs.push('Simulation is paused — press ▶︎ Play.');
-    const clockMins = window.TS?.clockMins ?? 0;
-    const inService = clockMins >= SERVICE_START && clockMins < SERVICE_END;
-    if(!inService) msgs.push('Outside service hours.');
-    if(veh <= 0) msgs.push('No vehicles assigned to this route.');
-    if((activeRoute.stops?.length||0) < 2) msgs.push('Add at least two stops.');
-    if(served <= 0) msgs.push('This route doesn’t cover both ends (home + destination) of any trips yet.');
-    if(msgs.length === 0 && live === 0 && projected > 0){
-      msgs.push('No one has boarded yet — give it a minute for the first bus to reach stops.');
+    let message = '';
+    if(window.TS?.paused){
+      message = 'Simulation is paused — press ▶ Play to start service.';
+    }else if((window.TS?.clockMins ?? 0) < SERVICE_START || (window.TS?.clockMins ?? 0) >= SERVICE_END){
+      message = 'Outside service hours right now.';
+    }else if(activeRoute.vehicles <= 0){
+      message = 'No vehicles assigned yet — add at least one to begin service.';
+    }else if(status === 'NO_OD'){
+      message = 'Needs homes & destinations. Place stops so a 🏠 and 🎯 overlap catchments.';
+    }else if(status === 'LONG_HEADWAY'){
+      message = 'Too infrequent right now. Add vehicles or shorten the loop to improve headway.';
+    }else if(routeLive === 0 && (activeRoute.projectedHr||0) > 0){
+      message = 'No riders yet — give the first vehicle a moment to reach stops.';
+    }else{
+      message = '';
     }
 
-    reason.textContent = (live===0) ? ('Why 0 right now: ' + msgs.join(' ')) : '';
+    reason.textContent = message;
   }
 
   function updateRouteMetrics(route){
@@ -667,8 +726,9 @@
     route.loopMinutes=loopMinutes;
     route.headway=headway;
 
+    route.projectedHr=0;
+
     if(coords.length<2){
-      route.ridership=0;
       route.servedTripsPerDay=0;
       return;
     }
@@ -688,27 +748,33 @@
     const serviceHours=Math.max(1, (SERVICE_END-SERVICE_START)/60);
     const hourlyDemand=servedTrips/serviceHours;
     if(!servedTrips || !isFinite(headway) || vehicles<=0){
-      route.ridership=0;
       return;
     }
 
-    const effectiveHeadway=Math.max(headway, 0.1);
-    const waitFactor=clamp(0,1, TARGET_HEADWAY_MIN/effectiveHeadway);
-    route.ridership=Math.round(hourlyDemand*waitFactor);
+    const loopHours = loopMinutes/60 || 0;
+    const vehPerHr = loopHours>0 ? (vehicles/loopHours) : 0;
+    const capHr = vehPerHr * 45;
+    const waitFactor = headway>0 && isFinite(headway) ? Math.min(1, TARGET_HEADWAY_MIN/Math.max(headway, 0.0001)) : 0;
+    const priceFactor = priceFactorForFare();
+    const projectedHr = Math.min(hourlyDemand, capHr) * waitFactor * priceFactor;
+    route.projectedHr = Number.isFinite(projectedHr) && projectedHr>0 ? projectedHr : 0;
   }
 
   function updateRouteStats(){
-    let vehiclesUsed=0, ridershipHr=0;
+    let vehiclesUsed=0, projectedTotal=0;
     for(const route of routes){
       updateRouteMetrics(route);
-      if(route.id===editingRouteId) updateRouteBreakdownUI(route);
+      if(route.id===editingRouteId){
+        updateRouteBreakdownUI(route);
+        renderRouteStatusChip(route);
+      }
       vehiclesUsed+=route.vehicles;
-      ridershipHr+=route.ridership;
+      projectedTotal+=route.projectedHr||0;
     }
     lastVehiclesUsed=vehiclesUsed;
-    lastRidershipHr=ridershipHr;
+    lastRidershipHr=projectedTotal;
     window.TS = window.TS || {};
-    window.TS.liveRidersPerHour = ridershipHr;
+    window.TS.projectedRidersPerHour = projectedTotal;
     const spare=Math.max(0, MAX_VEHICLES-vehiclesUsed);
     const vehLabel=$("#veh");
     if(vehLabel){ vehLabel.textContent=`${vehiclesUsed} / ${MAX_VEHICLES} (Spare: ${spare})`; }
@@ -720,13 +786,24 @@
     if(!route) return;
     const serviceHours = Math.max(1, (SERVICE_END-SERVICE_START)/60);
     const served = route.servedTripsPerDay||0;
-    const demandHr = Math.round(served/serviceHours);
+    const demandHr = served/serviceHours;
     const veh = Math.max(0, Number(route.vehicles)||0);
-    const vehPerHr = veh>0 ? (veh / (route.loopMinutes/60)) : 0;
-    const capHr = Math.round(vehPerHr * 45); // simple capacity
+    const loopHours = route.loopMinutes ? route.loopMinutes/60 : 0;
+    const vehPerHr = (loopHours>0 && veh>0) ? (veh / loopHours) : 0;
+    const capHr = vehPerHr * 45;
+    const waitFactor = (route.headway>0 && isFinite(route.headway)) ? Math.min(1, TARGET_HEADWAY_MIN/Math.max(route.headway,0.0001)) : 0;
     const fareNow = fare;
-    const priceFactor = Math.max(0.5, Math.min(1.5, 1 - 0.10*((fareNow-2.0)/0.5)));
-    const projected = Math.floor(Math.min(demandHr, capHr) * priceFactor);
+    const priceFactor = priceFactorForFare(fareNow);
+    const baseline = Math.min(demandHr, capHr);
+    const projected = route.projectedHr || 0;
+    const status = routeHealth(route);
+    const projectedLabel = (projected>0 || status==='OK') ? formatRidersHr(projected) : '—';
+    const demandDisplay = Number.isFinite(demandHr) ? demandHr.toFixed(1) : '0.0';
+    const vehPerHrDisplay = Number.isFinite(vehPerHr) ? vehPerHr.toFixed(2) : '0.00';
+    const capHrDisplay = Number.isFinite(capHr) ? capHr.toFixed(0) : '0';
+    const waitDisplay = Number.isFinite(waitFactor) ? waitFactor.toFixed(2) : '0.00';
+    const priceDisplay = Number.isFinite(priceFactor) ? priceFactor.toFixed(2) : '0.00';
+    const baselineDisplay = Number.isFinite(baseline) ? baseline.toFixed(1) : '0.0';
 
     const container=document.getElementById("routeDetails");
     if(!container) return;
@@ -738,13 +815,194 @@
     })();
 
     box.innerHTML = `
-      <div><strong>Projected riders/hr = <span id="projRidersHrInline">${projected.toString()}</span></strong></div>
+      <div><strong>Projected riders/hr = <span id="projRidersHrInline">${projectedLabel}</span> <span class="muted">/ hr</span></strong></div>
       <div>Served trips/day (both ends covered): <b>${served.toLocaleString()}</b></div>
-      <div>Demand/hr = served ÷ ${serviceHours} = <b>${demandHr}</b></div>
-      <div>Capacity/hr = (vehicles/loop hr) × 45 = <b>${vehPerHr.toFixed(1)}</b>×45 = <b>${capHr}</b></div>
-      <div>Price factor (@ $${fareNow.toFixed(2)}): <b>${priceFactor.toFixed(2)}</b></div>
-      <div>Riders/hr ≈ min(demand, capacity) × price = <b>${Math.min(demandHr, capHr)}</b> × ${priceFactor.toFixed(2)}</div>
+      <div>Demand/hr = served ÷ ${serviceHours} = <b>${demandDisplay}</b></div>
+      <div>Capacity/hr = (vehicles/loop hr) × 45 = <b>${vehPerHrDisplay}</b> × 45 = <b>${capHrDisplay}</b></div>
+      <div>Headway factor (target ${TARGET_HEADWAY_MIN}m): <b>${waitDisplay}</b></div>
+      <div>Price factor (@ $${fareNow.toFixed(2)}): <b>${priceDisplay}</b></div>
+      <div>Riders/hr ≈ min(demand, capacity) × headway × price = <b>${baselineDisplay}</b> × ${waitDisplay} × ${priceDisplay}</div>
     `;
+  }
+
+  function ensureDemandHeatOn(){
+    heatOn = true;
+    const toggle=document.getElementById('toggleDemandHeat');
+    if(toggle) toggle.checked = true;
+    renderHeat();
+  }
+
+  function incrementVehicles(route){
+    if(!route) return;
+    const next=Math.min(MAX_VEHICLES, (route.vehicles||0)+1);
+    if(next===route.vehicles) return;
+    route.vehicles=next;
+    updateRouteStats();
+    updateRouteDetails();
+    renderRoutesPanel();
+  }
+
+  function showShortenLoopTips(route){
+    if(!route) return;
+    ensureMapOverlays();
+    const coords=routeStopCoords(route);
+    if(coords.length<2) return;
+    let best=-1, bestIdx=0;
+    for(let i=0;i<coords.length;i++){
+      const a=coords[i];
+      const b=coords[(i+1)%coords.length];
+      const d=Math.hypot(a.x-b.x, a.y-b.y);
+      if(d>best){ best=d; bestIdx=i; }
+    }
+    if(best<=0) return;
+    const a=coords[bestIdx];
+    const b=coords[(bestIdx+1)%coords.length];
+    const points=[a,b];
+    for(const p of points){
+      const center=tileCenter(p.x,p.y);
+      const hint=document.createElement('div');
+      hint.className='segment-hint';
+      hint.style.left=center.x+'px';
+      hint.style.top=center.y+'px';
+      haloLayer && haloLayer.appendChild(hint);
+      setTimeout(()=>{ hint.remove(); }, 2400);
+    }
+    if(tipEl){
+      const aCenter=tileCenter(a.x,a.y);
+      const bCenter=tileCenter(b.x,b.y);
+      tipEl.style.left=((aCenter.x+bCenter.x)/2)+'px';
+      tipEl.style.top =((aCenter.y+bCenter.y)/2)+'px';
+      tipEl.textContent='Remove one of these stops to shorten the loop.';
+      tipEl.style.display='block';
+      setTimeout(()=>{ if(tipEl) tipEl.style.display='none'; }, 2400);
+    }
+  }
+
+  function showToast(title, body='', action){
+    const host=document.getElementById('toastHost');
+    if(!host) return;
+    const toast=document.createElement('div');
+    toast.className='toast';
+    const remove=()=>{
+      if(!toast.parentElement) return;
+      toast.classList.add('fade');
+      setTimeout(()=>{ toast.remove(); }, 320);
+    };
+    if(title){
+      const strong=document.createElement('strong');
+      strong.textContent=title;
+      toast.appendChild(strong);
+    }
+    if(body){
+      const span=document.createElement('span');
+      span.textContent=body;
+      toast.appendChild(span);
+    }
+    if(action && action.label){
+      const btn=document.createElement('button');
+      btn.textContent=action.label;
+      btn.addEventListener('click',()=>{
+        if(action.onClick) action.onClick();
+        remove();
+      });
+      toast.appendChild(btn);
+    }
+    host.appendChild(toast);
+    const duration = action?.duration ?? 5000;
+    setTimeout(remove, duration);
+  }
+
+  function getRouteStatusContent(route){
+    const status=routeHealth(route);
+    const headwayLabel = (route.vehicles>0 && isFinite(route.headway)) ? route.headway.toFixed(1)+'m' : '—';
+    const base={status,label:'',tip:'',actions:[],tone: status==='OK' ? 'ok' : 'warn'};
+    if(status==='NO_OD'){
+      base.label='Needs homes & destinations';
+      base.tip='Place stops so at least one 🏠 and one 🎯 overlap the green circles.';
+      base.actions.push({label:'Show demand heat', onClick:ensureDemandHeatOn});
+    }else if(status==='LONG_HEADWAY'){
+      base.label=`Too infrequent (headway ${headwayLabel})`;
+      base.actions.push({label:'+1 vehicle', onClick:()=>incrementVehicles(route)});
+      base.actions.push({label:'Shorten loop tips', onClick:()=>showShortenLoopTips(route), variant:'secondary'});
+    }else{
+      base.label='Good to go.';
+    }
+    return base;
+  }
+
+  function showStatusBanner(route, content){
+    if(!route || !content) return;
+    if(seenStatusBanners.has(content.status)) return;
+    seenStatusBanners.add(content.status);
+    const host=document.getElementById('bannerHost');
+    if(!host) return;
+    const banner=document.createElement('div');
+    banner.className='banner';
+    if(content.tone!=='ok') banner.dataset.state='warn';
+    const label=document.createElement('span');
+    label.textContent=content.label;
+    banner.appendChild(label);
+    if(content.tip){
+      const tip=document.createElement('span');
+      tip.className='chip-tip';
+      tip.textContent=content.tip;
+      banner.appendChild(tip);
+    }
+    if(content.actions?.length){
+      for(const action of content.actions){
+        const btn=document.createElement('button');
+        btn.textContent=action.label;
+        if(action.variant==='secondary') btn.classList.add('secondary');
+        btn.addEventListener('click',()=>{ action.onClick && action.onClick(); banner.classList.add('fade'); setTimeout(()=>banner.remove(), 320); });
+        banner.appendChild(btn);
+      }
+    }
+    host.appendChild(banner);
+    setTimeout(()=>{ banner.classList.add('fade'); setTimeout(()=>banner.remove(), 320); }, 5200);
+  }
+
+  function renderRouteStatusChip(route){
+    const mount=document.getElementById('routeStatusChipMount');
+    if(!mount) return;
+    mount.innerHTML='';
+    const content=getRouteStatusContent(route);
+    if(!content) return;
+    const previous=route.lastHealth;
+    route.lastHealth=content.status;
+    const chip=document.createElement('div');
+    chip.className='status-chip';
+    chip.dataset.state=content.tone==='ok' ? 'ok' : 'warn';
+    const label=document.createElement('span');
+    label.textContent=content.label;
+    chip.appendChild(label);
+    if(content.actions?.length){
+      const actions=document.createElement('div');
+      actions.className='chip-actions';
+      for(const action of content.actions){
+        const btn=document.createElement('button');
+        btn.className='btn'+(action.variant==='secondary' ? ' secondary' : '');
+        btn.textContent=action.label;
+        btn.addEventListener('click',(e)=>{ e.stopPropagation(); action.onClick && action.onClick(); });
+        actions.appendChild(btn);
+      }
+      chip.appendChild(actions);
+    }
+    if(content.tip){
+      const tip=document.createElement('div');
+      tip.className='chip-tip';
+      tip.textContent=content.tip;
+      chip.appendChild(tip);
+    }
+    mount.appendChild(chip);
+    showStatusBanner(route, content);
+    if(previous==='NO_OD' && content.status!=='NO_OD' && !route.connectionToastShown){
+      showToast('Nice—this route connects homes and destinations.', 'Press ▶ to start service.');
+      route.connectionToastShown=true;
+      if((route.vehicles||0)>=1 && (route.headway||Infinity) > 12 && !route.suggestedVehicleToast){
+        showToast('Headway is a bit long.', 'Add another vehicle to improve frequency.', {label:'+1 vehicle', onClick:()=>incrementVehicles(route)});
+        route.suggestedVehicleToast=true;
+      }
+    }
   }
 
   function updateRouteDetails(){
@@ -761,12 +1019,16 @@
     const safeName=escapeHTML(route.name||'');
     const loopLabel = route.loopMinutes ? route.loopMinutes.toFixed(1) : '—';
     const headwayLabel = (route.vehicles>0 && isFinite(route.headway)) ? `${route.headway.toFixed(1)} min` : 'No service';
+    const status=routeHealth(route);
+    const projectedLabel = (route.projectedHr>0 || status==='OK') ? `${formatRidersHr(route.projectedHr||0)} <span class="muted">/ hr</span>` : '—';
     details.innerHTML=`<div><strong>${safeName}</strong></div>
       <div>Stops placed: ${route.stops.length} (${uniqueStops} unique)</div>
       <div>Vehicles assigned: ${route.vehicles}</div>
       <div>Loop time: ${loopLabel} min · Headway: ${headwayLabel}</div>
-      <div>Estimated riders / hr (frequency-adjusted): ${route.ridership.toLocaleString()}</div>
+      <div>Projected riders/hr: <span>${projectedLabel}</span></div>
+      <div id="routeStatusChipMount"></div>
       <div style="margin-top:6px;">Click the map to add stops. Shift-click to remove the stop for this tile.</div>`;
+    renderRouteStatusChip(route);
     updateRouteBreakdownUI(route);
   }
 
@@ -841,8 +1103,10 @@
       const stopsSpan=document.createElement("span");
       stopsSpan.textContent=`Stops: ${routeStopCount(route)}`;
 
+      const status=routeHealth(route);
       const ridersSpan=document.createElement("span");
-      ridersSpan.textContent=`Riders/hr*: ${route.ridership.toLocaleString()}`;
+      const projectedLabel = (route.projectedHr>0 || status==='OK') ? `${formatRidersHr(route.projectedHr||0)} / hr` : '—';
+      ridersSpan.textContent=`Riders/hr*: ${projectedLabel}`;
       ridersSpan.title='Ridership scales with headway — assign more vehicles for higher frequency.';
 
       const headwaySpan=document.createElement("span");
@@ -873,6 +1137,12 @@
       meta.appendChild(ridersSpan);
       meta.appendChild(headwaySpan);
       meta.appendChild(vehiclesLabel);
+      if(status!=='OK'){
+        const badge=document.createElement('span');
+        badge.className='badge';
+        badge.textContent = status==='NO_OD' ? 'Needs homes & destinations' : 'Too infrequent';
+        meta.appendChild(badge);
+      }
       item.appendChild(meta);
 
       item.addEventListener("click",()=>{ selectRoute(route.id); });
@@ -1214,10 +1484,51 @@
 
   function stepMinute(){
     const inService = simMinute>=SERVICE_START && simMinute<SERVICE_END;
-    const ridersPerMinute = inService ? lastRidershipHr/60 : 0;
-    const revenue = ridersPerMinute * fare;
+    const currentHour=Math.floor(simMinute/60);
+    const dtHours=1/60;
+    let boardingsThisMinute=0;
+    if(inService){
+      for(const route of routes){
+        if(route.lastLiveHour!==currentHour){
+          route.lastLiveHour=currentHour;
+          route.liveRidersThisHour=0;
+        }
+        if(route.riderBank==null) route.riderBank=0;
+        const projected=Math.max(0, route.projectedHr||0);
+        if(projected>0){
+          route.riderBank += projected * dtHours;
+          const newBoardings=Math.floor(route.riderBank);
+          if(newBoardings>0){
+            route.riderBank -= newBoardings;
+            route.liveRidersThisHour = (route.liveRidersThisHour||0) + newBoardings;
+            boardingsThisMinute += newBoardings;
+            if(!route.firstRidersToastShown && route.liveRidersThisHour >= 1){
+              showToast('👏 First riders!', 'Your service is picking up.');
+              route.firstRidersToastShown=true;
+            }
+          }
+        }else{
+          route.riderBank=0;
+          route.liveRidersThisHour=0;
+        }
+      }
+    }else{
+      for(const route of routes){
+        if(route.lastLiveHour!==currentHour){
+          route.lastLiveHour=currentHour;
+        }
+        route.liveRidersThisHour=0;
+        route.riderBank=0;
+      }
+    }
+
+    const liveTotal = routes.reduce((sum,r)=>sum + (r.liveRidersThisHour||0),0);
+    window.TS = window.TS || {};
+    window.TS.liveRidersPerHour = liveTotal;
+
+    const revenue = boardingsThisMinute * fare;
     const expenses = inService ? (lastVehiclesUsed * VEHICLE_COST_PER_HOUR)/60 : 0;
-    ridersToday += ridersPerMinute;
+    ridersToday += boardingsThisMinute;
     revenueToday = Math.round((revenueToday + revenue)*100)/100;
     expensesToday = Math.round((expensesToday + expenses)*100)/100;
     cash = Math.round((cash + revenue - expenses)*100)/100;
@@ -1227,6 +1538,11 @@
       simMinute=0;
       simDay++;
       resetDailyTallies();
+      for(const route of routes){
+        route.liveRidersThisHour=0;
+        route.riderBank=0;
+        route.lastLiveHour=undefined;
+      }
     }
   }
 
@@ -1258,6 +1574,15 @@
     updatePlayButton();
     updateSpeedButtons();
     updateClockLabel();
+    seenStatusBanners.clear();
+    for(const route of routes){
+      route.riderBank=0;
+      route.liveRidersThisHour=0;
+      route.lastLiveHour=undefined;
+      route.connectionToastShown=false;
+      route.suggestedVehicleToast=false;
+      route.firstRidersToastShown=false;
+    }
     const route=editingRouteId ? routes.find(r=>r.id===editingRouteId) : null;
     updateRiderNumbersUI(route||null);
   }
@@ -1284,12 +1609,10 @@
     const clamped=Math.min(FARE_MAX, Math.max(FARE_MIN, Math.round(value*100)/100));
     fare=clamped;
     updateFareDisplay();
+    updateRouteStats();
     const r=editingRouteId ? routes.find(x=>x.id===editingRouteId) : null;
     if(r){
-      updateRouteBreakdownUI(r);
-      updateRiderNumbersUI(r);
-    }else{
-      updateRiderNumbersUI(null);
+      updateRouteDetails();
     }
   }
 
