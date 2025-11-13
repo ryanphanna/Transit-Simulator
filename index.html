@@ -831,6 +831,29 @@
     route.projectedHr = Number.isFinite(projectedHr) && projectedHr>0 ? projectedHr : 0;
   }
 
+  function getHeadwayFeedback(headwayMin, cityPop, routeDemand) {
+    if (headwayMin <= 15) return null; // always fine
+
+    // early game leniency
+    if (cityPop <= 200000) {
+      if (headwayMin > 35) return "Ridership might stay low with 35+ min gaps. A second vehicle could help.";
+      if (headwayMin > 25) return "Running every ~" + headwayMin + " min. Fine for now, but an extra bus would help.";
+      return null;
+    }
+
+    // mid-size city
+    if (cityPop <= 500000) {
+      if (headwayMin > 30) return "This corridor might need more frequent service.";
+      if (headwayMin > 20) return "Every " + headwayMin + " min is okay, but not ideal.";
+      return null;
+    }
+
+    // big city
+    if (headwayMin > 20) return "Pretty infrequent for a bus route of this scale.";
+    if (headwayMin > 15) return "Riders might wait a while — consider adding vehicles.";
+    return null;
+  }
+
   function analyzeRoute(route){
     if(!route) return;
     const served=route.servedTripsPerDay || 0;
@@ -856,8 +879,10 @@
       showCoachTip("You’re close! Stops might be too far apart to cover both ends of a trip.");
       return;
     }
-    if(headway>20 && veh<=1){
-      showCoachTip("Service every 20+ minutes? Even buses nap at that point. Add another vehicle.");
+    const population = window.TS?.population ?? 100000;
+    const headwayMessage = getHeadwayFeedback(headway, population, served);
+    if(headwayMessage){
+      showCoachTip(headwayMessage);
       return;
     }
     if(headway<6 && veh>4){
