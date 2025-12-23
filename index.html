@@ -8,10 +8,10 @@
   <style>
     :root{
       --topbar-h: 64px;
-      --bezel-x: clamp(16px, 4vw, 56px);
-      --col-gap: 24px;
+      --bezel-x: clamp(8px, 2vw, 24px);
+      --col-gap: 16px;
       --left-w: 360px;
-      --right-w: 360px;
+      --right-w: 250px;
       --card-bg: rgba(255,255,255,0.85);
       --card-br: 14px;
       --grid-border: #d9efe4;
@@ -45,9 +45,9 @@
     .app-title{font-size:20px; color:#0f172a; letter-spacing:0.02em;}
     .btn{height:32px; padding:0 10px; border:1px solid #cae9df; border-radius:10px; background:#fff; cursor:pointer;}
     .btn.active{background:#d1fae5; border-color:#34d399;}
-    #viewport{height: calc(100vh - var(--topbar-h)); padding: 16px var(--bezel-x); overflow: hidden;}
+    #viewport{height: calc(100vh - var(--topbar-h)); padding: 8px var(--bezel-x); overflow: hidden;}
     .grid3{display:grid; height:100%; gap: var(--col-gap); grid-template-columns: 1fr;}
-    @media (min-width: 1024px){.grid3{grid-template-columns: minmax(560px, 1fr) 320px;}}
+    @media (min-width: 1024px){.grid3{grid-template-columns: minmax(700px, 1fr) 250px;}}
     .card{background: var(--card-bg); border: 1px solid #dff1ea; border-radius: var(--card-br); box-shadow: 0 2px 6px rgba(20,83,45,0.06);}
     .col{min-height:0; height:100%;}
     .col-scroll{overflow: auto;}
@@ -290,7 +290,7 @@
   function sizeMap(){
     const map=$("#mapSquare"),wrap=$("#centerCol .map-wrap");
     const avail=Math.min(wrap.clientWidth,wrap.clientHeight);
-    const cell=Math.max(16, Math.floor(avail/GRID)), size=cell*GRID;
+    const cell=Math.max(30, Math.floor(avail/GRID)), size=cell*GRID;
     map.style.width=size+"px"; map.style.height=size+"px";
     map.querySelector(".gridLines").style.backgroundSize=cell+"px "+cell+"px";
     map.dataset.cell=cell;
@@ -340,7 +340,7 @@
     const map=$("#mapSquare");
     const cell=parseInt(map.dataset.cell||"24",10);
     const tiles=$$("#mapSquare .tile");
-    const base = Math.max(12, Math.round(cell*0.55));
+    const base = Math.max(16, Math.round(cell*0.75));
     for(const el of tiles){
       const gx=+el.dataset.gx, gy=+el.dataset.gy, sc=+(el.dataset.scale||1);
       el.style.left = (gx*cell + cell/2) + "px";
