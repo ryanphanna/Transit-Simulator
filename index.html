@@ -47,7 +47,7 @@
     .btn.active{background:#d1fae5; border-color:#34d399;}
     #viewport{height: calc(100vh - var(--topbar-h)); padding: 16px var(--bezel-x); overflow: hidden;}
     .grid3{display:grid; height:100%; gap: var(--col-gap); grid-template-columns: 1fr;}
-    @media (min-width: 1024px){.grid3{grid-template-columns: var(--left-w) minmax(560px, 1fr) var(--right-w);}}
+    @media (min-width: 1024px){.grid3{grid-template-columns: minmax(560px, 1fr) 320px;}}
     .card{background: var(--card-bg); border: 1px solid #dff1ea; border-radius: var(--card-br); box-shadow: 0 2px 6px rgba(20,83,45,0.06);}
     .col{min-height:0; height:100%;}
     .col-scroll{overflow: auto;}
@@ -141,25 +141,31 @@
     .modalMask{ position:fixed; inset:0; background:rgba(2,6,23,.45); display:none; place-items:center; z-index:50; }
     .modal{ background:#fff; width:min(680px,calc(100vw - 32px)); border-radius:14px; box-shadow:0 10px 30px rgba(2,6,23,.25); padding:18px; }
     .modal h3{ margin:4px 0 8px; }
+    @keyframes popupFloat{
+      0%{ transform:translate(-50%,-50%) scale(0.5); opacity:0; }
+      20%{ transform:translate(-50%,-50%) scale(1.1); opacity:1; }
+      100%{ transform:translate(-50%,-150%) scale(1); opacity:0; }
+    }
+    @keyframes celebrate{
+      0%{ transform:translate(-50%,-50%) scale(0.8); opacity:0; }
+      100%{ transform:translate(-50%,-50%) scale(1); opacity:1; }
+    }
   </style>
 </head>
 <body>
   <header id="topbar">
     <div class="hstack" id="topbarLeft">
-      <button class="btn" id="play">▶ Play</button>
-      <button class="btn spd" data-x="1">1×</button>
-      <button class="btn spd" data-x="4">4×</button>
-      <button class="btn spd" data-x="10">10×</button>
+      <strong class="app-title">Transit Draw Game</strong>
     </div>
     <div id="topbarCenter">
-      <strong class="app-title">Transit Simulator</strong>
+      <span id="dayDisplay" style="font-weight:600;">Day 1</span>
+      <span style="margin:0 8px;">|</span>
+      <span id="goalDisplay">🎯 Goal: <span id="goalRiders">5,000</span> daily riders</span>
     </div>
     <div class="hstack" id="topbarRight">
-      <button class="btn" id="jump">⏭ Jump</button>
-      <button class="btn" id="settings">⚙ Settings</button>
-      <button class="btn" id="helpBtn">❔ Help</button>
-      <button class="btn" id="reset">⟲ Reset</button>
-      <button class="btn" id="newmap">🗺️ New Map</button>
+      <button class="btn" id="play">▶ Play</button>
+      <button class="btn" id="reset">Reset</button>
+      <button class="btn" id="newmap">New City</button>
     </div>
   </header>
 
@@ -168,36 +174,21 @@
 
   <main id="viewport">
     <div class="grid3">
-      <aside class="col col-scroll card" id="leftCol">
-        <div class="section"><div class="muted">Cash</div><div class="stat" id="cash">$5,000,000</div></div>
-        <div class="section">
-          <div class="muted">Riders / hr</div>
-          <div style="display:flex; gap:10px; align-items:baseline;">
-            <div><strong id="liveRidersHr">0</strong> <span class="tag" id="liveStatusTag">paused</span></div>
-            <div class="muted">| projected: <span id="projRidersHr">0</span> <span class="muted">/ hr</span></div>
-          </div>
-          <div id="liveReason" class="muted" style="font-size:12px; margin-top:4px;"></div>
-        </div>
-        <div class="section"><div class="muted">Vehicles in use</div><div id="veh">0 / 10 (Spare: 10)</div></div>
-        <div class="section"><div class="muted">Daily money</div><div id="money">$0 – $0 = $0</div></div>
-        <div class="section">
-          <div class="muted">Potential trips / day</div>
-          <div id="potentialTrips">—</div>
-        </div>
-      </aside>
 
       <section class="col col-center card" id="centerCol">
         <div class="center-card">
           <div class="center-head">
             <!-- inside the center header above the map -->
             <div id="coach" class="coach" role="status" aria-live="polite">
-              Click the map to create your first route. Add stops where <b>homes 🏠</b> and <b>destinations</b> overlap.
+              Click the map to place stops near 🏠 homes and 🛍️ destinations. Watch your riders grow instantly!
             </div>
             <div id="statusBar" class="status-bar" aria-live="polite"></div>
           </div>
           <div id="coachTip" class="coach-tip"></div>
           <div class="map-wrap"><div id="mapSquare"><div class="gridLines"></div></div></div>
-          <div class="center-foot muted">Select a route to begin placing stops. Shift-click tiles to remove stops from the active route.</div>
+          <div class="center-foot muted">
+            <b>How to play:</b> Click [+ Add Route] → Click the map to place stops → Press ▶ Play to see it run → Goal: Connect homes and destinations to hit your rider target!
+          </div>
         </div>
       </section>
 
@@ -205,28 +196,19 @@
         <div class="section" id="routesPanel">
           <div class="hstack" style="justify-content:space-between;">
             <strong>Routes</strong>
-            <button class="btn" id="addRoute">＋ Route (N)</button>
+            <button class="btn" id="addRoute">+ Add Route</button>
           </div>
-          <div id="routeList" class="muted" style="margin-top:8px;">No routes yet. Add one to begin planning.</div>
-          <div id="routeDetails" class="muted" style="margin-top:12px;">
-            Select a route to edit its color, vehicles, and stops.
-          </div>
+          <div id="routeList" style="margin-top:12px;"></div>
         </div>
-        <div class="section"><strong>Fare &amp; Policy</strong><div class="hstack"><button class="btn" id="fareMinus">–</button><div id="fare">$2.00</div><button class="btn" id="farePlus">+</button></div><div class="muted">Range: $1.50 – $3.00</div></div>
-        <div class="section"><strong>Service Hours</strong><div class="muted">Start 06:00 · End 22:00</div></div>
-        <div class="section">
-          <strong>Demand</strong>
-          <div class="hstack" style="margin-top:6px;">
-            <label class="hstack">
-              <input id="toggleDemandHeat" type="checkbox" />
-              <span class="muted">Show demand heat</span>
-            </label>
-            <label class="hstack">
-              <input id="toggleInspector" type="checkbox" />
-              <span class="muted">Demand inspector</span>
-            </label>
+        <div class="section" id="networkSummary" style="border-top:2px solid #d1fae5; padding-top:16px;">
+          <strong style="font-size:15px;">Your Network</strong>
+          <div style="margin-top:12px; font-size:14px;">
+            <div><span class="muted">Total:</span> <strong id="totalRiders" style="font-size:20px; color:#059669;">0</strong> daily riders</div>
+            <div style="margin-top:6px;"><span class="muted">Goal:</span> <strong id="goalRidersSidebar">5,000</strong> riders</div>
+            <div id="progressBar" style="margin-top:10px; height:8px; background:#e5e7eb; border-radius:4px; overflow:hidden;">
+              <div id="progressFill" style="width:0%; height:100%; background:#10b981; transition:width 0.3s;"></div>
+            </div>
           </div>
-          <div class="muted" id="demandSummary" style="margin-top:6px;">Potential trips/day: —</div>
         </div>
       </aside>
     </div>
@@ -234,16 +216,18 @@
 
   <div id="helpMask" class="modalMask">
     <div class="modal">
-      <h3>How to Play (Quick)</h3>
-      <ol>
-        <li><b>Click the map</b> to create a route and place a stop.</li>
-        <li>Add stops so <b>homes 🏠</b> and <b>destinations</b> (🛍️ 🏫 🏢 🍔 🎡 🏥) are both within ~1 tile of some stop on the same route.</li>
-        <li>Keep the loop <b>short</b>; assign more vehicles to improve headway if crowded.</li>
-        <li>Riders/hr ≈ min(<i>demand/hr</i>, <i>capacity/hr</i>) × <i>price factor</i>.</li>
+      <h3>Transit Draw Game - How to Play</h3>
+      <ol style="line-height:1.8;">
+        <li><b>Click [+ Add Route]</b> to create your first route.</li>
+        <li><b>Click the map</b> to place stops near homes 🏠 and destinations (🛍️ 🏫 🏢 🍔 🎡 🏥).</li>
+        <li><b>Watch the numbers!</b> Each stop shows you instantly how many riders you'll get.</li>
+        <li><b>Press ▶ Play</b> to see your transit network in action.</li>
+        <li><b>Goal:</b> Connect enough homes and destinations to hit your daily rider target!</li>
       </ol>
-      <p style="font-size:12px;color:#64748b">Tips: Press <b>N</b> for a new route, <b>H</b> for help, <b>Esc</b> to stop editing a route.</p>
+      <p style="font-size:13px;color:#059669; font-weight:600;">💡 Tip: The more homes AND destinations a route covers, the more riders you get!</p>
+      <p style="font-size:12px;color:#64748b">Shortcuts: Press <b>N</b> for new route, <b>Esc</b> to deselect route.</p>
       <div style="text-align:right; margin-top:10px;">
-        <button class="btn" id="closeHelp">Close</button>
+        <button class="btn" id="closeHelp">Got it!</button>
       </div>
     </div>
   </div>
@@ -278,6 +262,10 @@
   const FARE_STEP=0.05;
   const DEFAULT_FARE=2.0;
   const DEFAULT_STOP_COLOR="#059669";
+
+  // --- GAME CONFIG
+  let goalRiders = 5000;  // Daily rider goal
+  let totalDailyRiders = 0;
 
   let simMinute=SERVICE_START;
   let simDay=1;
@@ -685,7 +673,7 @@
     const id=`r${routeSeq++}`;
     const colors=['#1d4ed8','#dc2626','#047857','#9333ea','#f59e0b','#0891b2'];
     const color=colors[(routes.length)%colors.length];
-    const route={id,name:`Route ${routes.length+1}`,color,vehicles:1,stops:[],loopMinutes:MIN_LOOP_MINUTES,headway:Infinity,servedTripsPerDay:0,projectedHr:0,liveRidersThisHour:0,lastHealth:'NO_OD',connectionToastShown:false,suggestedVehicleToast:false,firstRidersToastShown:false};
+    const route={id,name:`Route ${routes.length+1}`,color,vehicles:1,stops:[],loopMinutes:MIN_LOOP_MINUTES,headway:Infinity,servedTripsPerDay:0,projectedHr:0,dailyRiders:0,liveRidersThisHour:0,lastHealth:'NO_OD',connectionToastShown:false,suggestedVehicleToast:false,firstRidersToastShown:false};
     routes.push(route);
     selectRoute(id);
     renderRoutesPanel();
@@ -776,12 +764,17 @@
   function updateRouteMetrics(route){
     const coords=routeStopCoords(route);
     const loopMinutes=computeLoopMinutes(route);
-    const vehicles=Math.max(0, Number(route.vehicles)||0);
-    const headway=vehicles>0 ? loopMinutes/vehicles : Infinity;
+
+    // AUTO-CALCULATE VEHICLES based on loop length (simple game mechanic)
+    const autoVehicles = coords.length < 2 ? 0 : Math.max(1, Math.min(MAX_VEHICLES, Math.ceil(loopMinutes / 15)));
+    route.vehicles = autoVehicles;
+
+    const headway=autoVehicles>0 ? loopMinutes/autoVehicles : Infinity;
     route.loopMinutes=loopMinutes;
     route.headway=headway;
 
     route.projectedHr=0;
+    route.dailyRiders=0;
 
     const countedTiles=new Set();
     let homesCount=0, destsCount=0;
@@ -804,31 +797,15 @@
       return;
     }
 
-    const coverageRadius=1.01;
-    let servedTrips=0;
-    for(const trip of od){
-      const originServed=coords.some(c=>Math.hypot(c.x-trip.ox, c.y-trip.oy)<=coverageRadius);
-      if(!originServed) continue;
-      const destServed=coords.some(c=>Math.hypot(c.x-trip.dx, c.y-trip.dy)<=coverageRadius);
-      if(!destServed) continue;
-      servedTrips+=trip.tripsPerDay;
-    }
-
-    route.servedTripsPerDay=servedTrips;
+    // SIMPLIFIED RIDERSHIP: Just based on coverage
+    // Each home-destination pair covered = ~50 daily riders
+    const ridersPerPair = 50;
+    const dailyRiders = Math.round(homesCount * destsCount * ridersPerPair * 0.1); // Scale factor
+    route.dailyRiders = dailyRiders;
+    route.servedTripsPerDay = dailyRiders;
 
     const serviceHours=Math.max(1, (SERVICE_END-SERVICE_START)/60);
-    const hourlyDemand=servedTrips/serviceHours;
-    if(!servedTrips || !isFinite(headway) || vehicles<=0){
-      return;
-    }
-
-    const loopHours = loopMinutes/60 || 0;
-    const vehPerHr = loopHours>0 ? (vehicles/loopHours) : 0;
-    const capHr = vehPerHr * 45;
-    const waitFactor = headway>0 && isFinite(headway) ? Math.min(1, TARGET_HEADWAY_MIN/Math.max(headway, 0.0001)) : 0;
-    const priceFactor = priceFactorForFare();
-    const projectedHr = Math.min(hourlyDemand, capHr) * waitFactor * priceFactor;
-    route.projectedHr = Number.isFinite(projectedHr) && projectedHr>0 ? projectedHr : 0;
+    route.projectedHr = dailyRiders / serviceHours;
   }
 
   function getHeadwayFeedback(headwayMin, cityPop, routeDemand) {
@@ -1141,30 +1118,7 @@
   }
 
   function updateRouteDetails(){
-    const details=$("#routeDetails");
-    if(!details) return;
-    const route=routes.find(r=>r.id===editingRouteId);
-    if(!route){
-      details.innerHTML='Select a route to edit its color, vehicles, and stops.';
-      const breakdown=document.getElementById("routeBreakdown");
-      if(breakdown) breakdown.remove();
-      return;
-    }
-    const uniqueStops=new Set(route.stops).size;
-    const safeName=escapeHTML(route.name||'');
-    const loopLabel = route.loopMinutes ? route.loopMinutes.toFixed(1) : '—';
-    const headwayLabel = (route.vehicles>0 && isFinite(route.headway)) ? `${route.headway.toFixed(1)} min` : 'No service';
-    const status=routeHealth(route);
-    const projectedLabel = (route.projectedHr>0 || status==='OK') ? `${formatRidersHr(route.projectedHr||0)} <span class="muted">/ hr</span>` : '—';
-    details.innerHTML=`<div><strong>${safeName}</strong></div>
-      <div>Stops placed: ${route.stops.length} (${uniqueStops} unique)</div>
-      <div>Vehicles assigned: ${route.vehicles}</div>
-      <div>Loop time: ${loopLabel} min · Headway: ${headwayLabel}</div>
-      <div>Projected riders/hr: <span>${projectedLabel}</span></div>
-      <div id="routeStatusChipMount"></div>
-      <div style="margin-top:6px;">Click the map to add stops. Shift-click to remove the stop for this tile.</div>`;
-    renderRouteStatusChip(route);
-    updateRouteBreakdownUI(route);
+    // Simplified - no detailed breakdown needed for the game
   }
 
   function updateEditingStatus(){
@@ -1185,107 +1139,74 @@
     if(!list) return;
     list.innerHTML="";
     if(!routes.length){
-      list.textContent='No routes yet. Add one to begin planning.';
-      list.classList.add('muted');
+      list.innerHTML='<div class="muted" style="text-align:center; padding:20px;">No routes yet.<br>Click [+ Add Route] to start!</div>';
       renderRouteOverlays();
+      updateNetworkSummary();
       return;
     }
-    list.classList.remove('muted');
     for(const route of routes){
       const item=document.createElement("div");
       item.className="routeItem"+(route.id===editingRouteId?" active":"");
       item.dataset.route=route.id;
-      item.style.borderLeft=`6px solid ${route.color}`;
-      item.style.paddingLeft="12px";
 
-      const title=document.createElement("div");
-      title.className="routeTitle";
+      // Simple display: just color circle, name, and daily riders
+      const colorCircle = document.createElement("div");
+      colorCircle.style.cssText = `width:20px; height:20px; border-radius:50%; background:${route.color}; flex-shrink:0;`;
 
-      const nameInput=document.createElement("input");
-      nameInput.type="text";
-      nameInput.value=route.name;
-      nameInput.addEventListener("click",e=>e.stopPropagation());
-      nameInput.addEventListener("input",e=>{ route.name=e.target.value; updateRouteDetails(); updateEditingStatus(); });
-      nameInput.addEventListener("blur",()=>{
-        if(!route.name || !route.name.trim()){
-          const fallbackIndex=routes.indexOf(route)+1;
-          route.name=`Route ${fallbackIndex}`;
-          nameInput.value=route.name;
-          updateRouteDetails();
-          updateEditingStatus();
-        }
-      });
+      const routeInfo = document.createElement("div");
+      routeInfo.style.cssText = "flex:1; display:flex; justify-content:space-between; align-items:center;";
 
-      const colorInput=document.createElement("input");
-      colorInput.type="color";
-      colorInput.value=route.color;
-      colorInput.addEventListener("click",e=>e.stopPropagation());
-      colorInput.addEventListener("input",e=>{
-        route.color=e.target.value;
-        updateRouteDetails();
-        refreshStopsForRoute(route);
-        renderRouteOverlays();
-        renderRoutesPanel();
-      });
+      const nameSpan = document.createElement("span");
+      nameSpan.textContent = route.name;
+      nameSpan.style.fontWeight = "600";
 
-      title.appendChild(nameInput);
-      title.appendChild(colorInput);
-      item.appendChild(title);
+      const ridersSpan = document.createElement("span");
+      const dailyRiders = route.dailyRiders || 0;
+      ridersSpan.textContent = `${dailyRiders.toLocaleString()} daily riders`;
+      ridersSpan.style.cssText = "color:#059669; font-size:13px;";
 
-      const meta=document.createElement("div");
-      meta.className="routeMeta";
-
-      const stopsSpan=document.createElement("span");
-      stopsSpan.textContent=`Stops: ${routeStopCount(route)}`;
-
-      const status=routeHealth(route);
-      const ridersSpan=document.createElement("span");
-      const projectedLabel = (route.projectedHr>0 || status==='OK') ? `${formatRidersHr(route.projectedHr||0)} / hr` : '—';
-      ridersSpan.textContent=`Riders/hr*: ${projectedLabel}`;
-      ridersSpan.title='Ridership scales with headway — assign more vehicles for higher frequency.';
-
-      const headwaySpan=document.createElement("span");
-      headwaySpan.textContent=route.vehicles>0 && isFinite(route.headway)
-        ? `Headway: ${route.headway.toFixed(1)} min`
-        : 'Headway: No service';
-
-      const vehiclesLabel=document.createElement("label");
-      vehiclesLabel.textContent="Vehicles";
-      const vehiclesInput=document.createElement("input");
-      vehiclesInput.type="number";
-      vehiclesInput.min="0";
-      vehiclesInput.max=String(MAX_VEHICLES);
-      vehiclesInput.value=route.vehicles;
-      vehiclesInput.style.width="56px";
-      vehiclesInput.addEventListener("click",e=>e.stopPropagation());
-      vehiclesInput.addEventListener("change",e=>{
-        const v=Math.max(0, Math.min(MAX_VEHICLES, parseInt(e.target.value||"0",10)));
-        route.vehicles=v;
-        vehiclesInput.value=v;
-        updateRouteStats();
-        updateRouteDetails();
-        renderRoutesPanel();
-        analyzeRoute(route);
-      });
-      vehiclesLabel.appendChild(vehiclesInput);
-
-      meta.appendChild(stopsSpan);
-      meta.appendChild(ridersSpan);
-      meta.appendChild(headwaySpan);
-      meta.appendChild(vehiclesLabel);
-      if(status!=='OK'){
-        const badge=document.createElement('span');
-        badge.className='badge';
-        badge.textContent = status==='NO_OD' ? 'Needs homes & destinations' : 'Too infrequent';
-        meta.appendChild(badge);
+      // Dim if no riders
+      if(dailyRiders === 0) {
+        item.style.opacity = "0.5";
+        ridersSpan.style.color = "#94a3b8";
       }
-      item.appendChild(meta);
+
+      routeInfo.appendChild(nameSpan);
+      routeInfo.appendChild(ridersSpan);
+
+      item.style.cssText = "display:flex; gap:10px; align-items:center; padding:12px; margin-bottom:8px; background:rgba(255,255,255,0.9); border:1px solid #d7ece3; border-radius:10px; cursor:pointer; transition:all 0.2s;";
+      item.appendChild(colorCircle);
+      item.appendChild(routeInfo);
 
       item.addEventListener("click",()=>{ selectRoute(route.id); });
-
       list.appendChild(item);
     }
     renderRouteOverlays();
+    updateNetworkSummary();
+  }
+
+  function updateNetworkSummary(){
+    const totalRidersEl = $("#totalRiders");
+    const goalRidersSidebarEl = $("#goalRidersSidebar");
+    const progressFillEl = $("#progressFill");
+
+    totalDailyRiders = routes.reduce((sum, r) => sum + (r.dailyRiders || 0), 0);
+
+    if(totalRidersEl) totalRidersEl.textContent = totalDailyRiders.toLocaleString();
+    if(goalRidersSidebarEl) goalRidersSidebarEl.textContent = goalRiders.toLocaleString();
+    if(progressFillEl) {
+      const progress = Math.min(100, (totalDailyRiders / goalRiders) * 100);
+      progressFillEl.style.width = progress + "%";
+    }
+
+    // Update goal display in header
+    const goalRidersHeaderEl = $("#goalRiders");
+    if(goalRidersHeaderEl) goalRidersHeaderEl.textContent = goalRiders.toLocaleString();
+
+    // Check win condition
+    if(totalDailyRiders >= goalRiders && routes.length > 0) {
+      showWinCelebration();
+    }
   }
 
   function addStopToRoute(route,gx,gy){
@@ -1293,12 +1214,24 @@
     if(route.stops.includes(stop.id)){
       return;
     }
+
+    // Store previous riders for delta calculation
+    const previousRiders = route.dailyRiders || 0;
+
     route.stops.push(stop.id);
     stop.usage=(stop.usage||0)+1;
     if(!stop.routes) stop.routes=new Set();
     stop.routes.add(route.id);
     updateStopColors(stop);
     updateRouteMetrics(route);
+
+    // Calculate delta and show popup!
+    const newRiders = route.dailyRiders || 0;
+    const delta = newRiders - previousRiders;
+    if(delta > 0) {
+      showRiderPopup(gx, gy, delta);
+    }
+
     analyzeRoute(route);
     updateRouteStats();
     updateRouteDetails();
@@ -1306,6 +1239,75 @@
     renderRouteOverlays();
     drawCatchmentsForRoute(route);
   }
+
+  function showRiderPopup(gx, gy, delta) {
+    const map = $("#mapSquare");
+    if(!map) return;
+
+    const pos = tileCenter(gx, gy);
+    const popup = document.createElement("div");
+    popup.style.cssText = `
+      position: absolute;
+      left: ${pos.x}px;
+      top: ${pos.y}px;
+      transform: translate(-50%, -50%);
+      background: #10b981;
+      color: white;
+      padding: 8px 16px;
+      border-radius: 20px;
+      font-weight: bold;
+      font-size: 18px;
+      pointer-events: none;
+      z-index: 100;
+      box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4);
+      animation: popupFloat 1.5s ease-out forwards;
+    `;
+    popup.textContent = `+${delta} riders! 🎉`;
+
+    map.appendChild(popup);
+    setTimeout(() => popup.remove(), 1500);
+  }
+
+  function showWinCelebration() {
+    // Only show once
+    if(window.hasShownWinCelebration) return;
+    window.hasShownWinCelebration = true;
+
+    const banner = document.createElement("div");
+    banner.style.cssText = `
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: linear-gradient(135deg, #10b981, #059669);
+      color: white;
+      padding: 40px 60px;
+      border-radius: 20px;
+      font-size: 32px;
+      font-weight: bold;
+      text-align: center;
+      z-index: 1000;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+      animation: celebrate 0.6s ease-out;
+    `;
+    banner.innerHTML = `
+      🎉 SUCCESS! 🎉<br>
+      <div style="font-size:20px; margin-top:12px; font-weight:normal;">You connected the city!</div>
+      <div style="margin-top:20px; display:flex; gap:12px; justify-content:center;">
+        <button onclick="tryBiggerCity()" style="padding:12px 24px; background:white; color:#059669; border:none; border-radius:10px; font-weight:600; cursor:pointer; font-size:16px;">Try Bigger City</button>
+        <button onclick="location.reload()" style="padding:12px 24px; background:rgba(255,255,255,0.2); color:white; border:none; border-radius:10px; font-weight:600; cursor:pointer; font-size:16px;">Try New Map</button>
+      </div>
+    `;
+
+    document.body.appendChild(banner);
+  }
+
+  window.tryBiggerCity = function() {
+    goalRiders = 12000;
+    window.hasShownWinCelebration = false;
+    document.querySelector("body > div[style*='position: fixed']")?.remove();
+    updateNetworkSummary();
+  };
 
   function removeStopFromRoute(route,gx,gy){
     const key=stopKey(gx,gy);
@@ -1549,19 +1551,16 @@
     const timeText = (window.TS?.timeText) || formatTime(simMinute);
     const serviceText = (window.TS?.serviceText) || serviceStatus();
 
-    const cityName = (window.TS?.cityName) || "Tutorial City";
-    const population = (window.TS?.population ?? 100000);
-    const goalPct = (window.TS?.goalPct ?? 5);
-    const goalDays = (window.TS?.goalDays ?? 30);
+    // Update day display in header
+    const dayDisplayEl = document.getElementById("dayDisplay");
+    if(dayDisplayEl){
+      dayDisplayEl.textContent = dayText;
+    }
 
-    const left = `${dayText} · ${timeText} — ${serviceText}`;
-    const right = `${cityName} · Population ${Number(population).toLocaleString()} · Goal: ${goalPct}% for ${goalDays} days`;
-
-    const full = `${left} · ${right}`;
-    const el = document.getElementById("statusBar");
-    if(el){
-      el.textContent = full;
-      el.title = full;
+    // Update status bar with time and service status
+    const statusBarEl = document.getElementById("statusBar");
+    if(statusBarEl){
+      statusBarEl.textContent = `${timeText} — ${serviceText}`;
     }
   }
 
@@ -1767,48 +1766,22 @@
     resetSimulationState();
     const coachEl=$("#coach");
     const helpMask=$("#helpMask");
-    const helpBtn=$("#helpBtn");
     const closeHelp=$("#closeHelp");
     const mapEl=$("#mapSquare");
     const addRouteBtn=$("#addRoute");
 
-    coachEl && (coachEl.textContent = "Click the map to create your first route. Aim for tiles where homes 🏠 and destinations overlap.");
+    coachEl && (coachEl.textContent = "Click [+ Add Route] then place stops near 🏠 homes and 🛍️ destinations. Watch your riders grow!");
 
-    if(helpBtn && helpMask){ helpBtn.onclick=()=>{ helpMask.style.display="grid"; }; }
     if(closeHelp && helpMask){ closeHelp.onclick=()=>{ helpMask.style.display="none"; }; }
 
-    // controls
-    $("#fareMinus").onclick=()=>{ setFare(fare-FARE_STEP); };
-    $("#farePlus").onclick=()=>{ setFare(fare+FARE_STEP); };
     window.addEventListener("resize",()=>{
       sizeMap();
       layoutTiles();
       drawCatchmentsForRoute(routes.find(r=>r.id===editingRouteId));
-      renderHeat();
-      if(inspectorOn){
-        if(inspectorLayer) inspectorLayer.innerHTML="";
-      }
     });
 
     if(mapEl){
       mapEl.addEventListener("click", mapClickRouter);
-      mapEl.addEventListener("mousemove",(e)=>{
-        if(!editingRouteId) return;
-        const r=routes.find(x=>x.id===editingRouteId); if(!r) return;
-        ensureMapOverlays();
-        const rect=mapEl.getBoundingClientRect(), c=cellSize();
-        const gx=Math.max(0, Math.min(GRID-1, Math.floor((e.clientX-rect.left)/c)));
-        const gy=Math.max(0, Math.min(GRID-1, Math.floor((e.clientY-rect.top )/c)));
-        const base = r.servedTripsPerDay||0;
-        const withStop = computeServedTripsForTemp(r, gx, gy);
-        const delta = Math.max(0, withStop - base);
-        const pos = tileCenter(gx,gy);
-        if(!tipEl) return;
-        tipEl.style.left=pos.x+"px";
-        tipEl.style.top =pos.y+"px";
-        tipEl.textContent = delta>0 ? `Add stop: +${delta} trips/day` : `Add stop`;
-        tipEl.style.display="block";
-      });
       mapEl.addEventListener("mouseleave",()=>{ tipEl && (tipEl.style.display="none"); });
     }
     if(addRouteBtn){
@@ -1816,33 +1789,39 @@
         const route=makeRoute();
         updateEditingStatus();
         drawCatchmentsForRoute(route);
-        coachEl && (coachEl.textContent="Click the map to add stops on your new route.");
+        coachEl && (coachEl.textContent="Great! Now click the map to place stops. Connect homes 🏠 to destinations 🛍️!");
       });
     }
 
-    // Demand toggles
-    $("#toggleDemandHeat").addEventListener("change",(e)=>{ heatOn=e.target.checked; renderHeat(); });
-    $("#toggleInspector").addEventListener("change",(e)=>{ inspectorOn=e.target.checked; if(inspectorOn) enableInspectorHandlers(); else disableInspectorHandlers(); });
-
-    // speed controls
-    $$(".spd").forEach(btn=>{
-      btn.addEventListener("click",()=>{
-        const mult=parseInt(btn.dataset.x||"1",10);
-        setSpeed(mult);
-      });
-    });
-
     $("#play").addEventListener("click", ()=>{ setSimRunning(!simRunning); });
-    $("#jump").addEventListener("click", ()=>{ jumpToServiceStart(); });
-    $("#newmap").addEventListener("click", ()=>{ setSimRunning(false); resetRoutes(); rebuildAll(); resetSimulationState(); updateStatusBar(); coachEl && (coachEl.textContent = "Click the map to create your first route. Aim for tiles where homes 🏠 and destinations overlap."); helpMask && (helpMask.style.display="none"); });
-    $("#reset").addEventListener("click", ()=>{ setSimRunning(false); resetRoutes(); rebuildAll(); resetSimulationState(); updateStatusBar(); coachEl && (coachEl.textContent = "Click the map to create your first route. Aim for tiles where homes 🏠 and destinations overlap."); helpMask && (helpMask.style.display="none"); });
+    $("#newmap").addEventListener("click", ()=>{
+      window.hasShownWinCelebration = false;
+      goalRiders = 5000;
+      setSimRunning(false);
+      resetRoutes();
+      rebuildAll();
+      resetSimulationState();
+      updateStatusBar();
+      coachEl && (coachEl.textContent = "Click [+ Add Route] then place stops near 🏠 homes and 🛍️ destinations. Watch your riders grow!");
+      helpMask && (helpMask.style.display="none");
+    });
+    $("#reset").addEventListener("click", ()=>{
+      window.hasShownWinCelebration = false;
+      goalRiders = 5000;
+      setSimRunning(false);
+      resetRoutes();
+      rebuildAll();
+      resetSimulationState();
+      updateStatusBar();
+      coachEl && (coachEl.textContent = "Click [+ Add Route] then place stops near 🏠 homes and 🛍️ destinations. Watch your riders grow!");
+      helpMask && (helpMask.style.display="none");
+    });
 
     window.addEventListener("keydown",(e)=>{
       const activeEl=document.activeElement;
       if(activeEl && (activeEl.tagName==='INPUT' || activeEl.tagName==='TEXTAREA' || activeEl.isContentEditable)) return;
       if(e.ctrlKey || e.metaKey || e.altKey) return;
-      if(e.key.toLowerCase()==="n"){ makeRoute(); coachEl && (coachEl.textContent="Click the map to add stops on your new route."); }
-      else if(e.key.toLowerCase()==="h"){ helpMask && (helpMask.style.display="grid"); }
+      if(e.key.toLowerCase()==="n"){ makeRoute(); coachEl && (coachEl.textContent="Great! Now click the map to place stops. Connect homes 🏠 to destinations 🛍️!"); }
       else if(e.key==="Escape"){ editingRouteId=null; renderRoutesPanel(); updateRouteDetails(); updateEditingStatus(); clearHalos(); updateRiderNumbersUI(null); tipEl && (tipEl.style.display="none"); }
     });
 
