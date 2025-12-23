@@ -1215,8 +1215,10 @@
       return;
     }
 
-    // Store previous riders for delta calculation
+    // Store previous riders and coverage for delta calculation
     const previousRiders = route.dailyRiders || 0;
+    const previousHomes = route.coveredHomes || 0;
+    const previousDests = route.coveredDests || 0;
 
     route.stops.push(stop.id);
     stop.usage=(stop.usage||0)+1;
@@ -1225,10 +1227,15 @@
     updateStopColors(stop);
     updateRouteMetrics(route);
 
-    // Calculate delta and show popup!
+    // Calculate delta and show popup - only if new coverage was added
     const newRiders = route.dailyRiders || 0;
+    const newHomes = route.coveredHomes || 0;
+    const newDests = route.coveredDests || 0;
     const delta = newRiders - previousRiders;
-    if(delta > 0) {
+
+    // Only show popup if this stop added new homes or destinations
+    const addedNewCoverage = (newHomes > previousHomes) || (newDests > previousDests);
+    if(delta > 0 && addedNewCoverage) {
       showRiderPopup(gx, gy, delta);
     }
 
