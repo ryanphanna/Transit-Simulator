@@ -888,7 +888,7 @@
     window.TS.projectedRidersPerHour = projectedTotal;
     const spare=Math.max(0, MAX_VEHICLES-vehiclesUsed);
     const vehLabel=$("#veh");
-    if(vehLabel){ vehLabel.textContent=`${vehiclesUsed} / ${MAX_VEHICLES} (Spare: ${spare})`; }
+    if(vehLabel) vehLabel.textContent=`${vehiclesUsed} / ${MAX_VEHICLES} (Spare: ${spare})`;
     const active=editingRouteId ? routes.find(r=>r.id===editingRouteId) : null;
     updateRiderNumbersUI(active||null);
   }
@@ -1407,8 +1407,10 @@
         }
       }
     }
-    $("#demandSummary").textContent=`Potential trips/day: ${total.toLocaleString()}`;
-    $("#potentialTrips") && ($("#potentialTrips").textContent = total.toLocaleString());
+    const demandSummary = $("#demandSummary");
+    if(demandSummary) demandSummary.textContent=`Potential trips/day: ${total.toLocaleString()}`;
+    const potentialTrips = $("#potentialTrips");
+    if(potentialTrips) potentialTrips.textContent = total.toLocaleString();
     updateRouteStats();
     renderRoutesPanel();
     updateRouteDetails();
@@ -1523,7 +1525,7 @@
 
   function updateFinanceUI(){
     const cashEl=$("#cash");
-    if(cashEl){ cashEl.textContent=formatMoney(cash); }
+    if(cashEl) cashEl.textContent=formatMoney(cash);
     const money=$("#money");
     if(money){
       const net=revenueToday-expensesToday;
@@ -1744,7 +1746,7 @@
 
   function updateFareDisplay(){
     const fareLabel=$("#fare");
-    if(fareLabel){ fareLabel.textContent=`$${fare.toFixed(2)}`; }
+    if(fareLabel) fareLabel.textContent=`$${fare.toFixed(2)}`;
   }
 
   function setFare(value){
